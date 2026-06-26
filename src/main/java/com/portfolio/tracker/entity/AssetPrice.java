@@ -3,6 +3,7 @@ package com.portfolio.tracker.entity;
 import jakarta.persistence.*;
 import lombok.*;
 
+import jakarta.persistence.Id;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.UUID;

@@ -4,9 +4,9 @@ import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
-
 import com.portfolio.tracker.enums.AssetType;
 
+import jakarta.persistence.Id;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
