@@ -1,7 +1,5 @@
-package com.portfolio.tracker.service;
+package com.portfolio.tracker.user;
 
-import com.portfolio.tracker.entity.User;
-import com.portfolio.tracker.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 

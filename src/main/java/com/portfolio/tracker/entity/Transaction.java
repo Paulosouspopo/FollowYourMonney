@@ -5,6 +5,7 @@ import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
+import com.portfolio.tracker.asset.Asset;
 import com.portfolio.tracker.enums.TransactionType;
 
 import java.math.BigDecimal;

@@ -37,6 +37,22 @@ public class TransactionService {
         return transactionRepository.save(transaction);
     }
 
+    public Transaction update(UUID id, Transaction transaction) {
+        Transaction existingTransaction = findById(id);
+        existingTransaction.setId(id);
+        existingTransaction.setAsset(transaction.getAsset());
+        existingTransaction.setType(transaction.getType());
+        existingTransaction.setQuantity(transaction.getQuantity());
+        existingTransaction.setPricePerUnit(transaction.getPricePerUnit());
+        existingTransaction.setTotalAmount(transaction.getTotalAmount());
+        existingTransaction.setCurrency(transaction.getCurrency());
+        existingTransaction.setNotes(transaction.getNotes());
+        existingTransaction.setTransactionDate(transaction.getTransactionDate());
+        existingTransaction.setCreatedAt(transaction.getCreatedAt());
+        existingTransaction.setUpdatedAt(LocalDateTime.now());
+        return transactionRepository.save(existingTransaction);
+    }
+
     public void deleteById(UUID id) {
         transactionRepository.deleteById(id);
     }

@@ -1,51 +1,50 @@
-package com.portfolio.tracker.entity;
+package com.portfolio.tracker.portfolio;
 
 import com.portfolio.tracker.asset.Asset;
-import com.portfolio.tracker.enums.Frequency;
+import com.portfolio.tracker.user.User;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
-import jakarta.persistence.Id;
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
-@Table(name = "recurring_investments")
-@Data
+@Table(name = "portfolios")
+@Getter
+@Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class RecurringInvestment {
+public class Portfolio {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @ManyToOne
-    @JoinColumn(name = "asset_id", nullable = false)
-    private Asset asset;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", nullable = false)
+    private User user;
 
-    @Column(nullable = false, precision = 19, scale = 2)
-    private BigDecimal amount;
+    @Column(nullable = false)
+    private String name;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    private Frequency frequency;
+    private PortfolioType type;
 
-    private LocalDateTime startDate;
-    private LocalDateTime nextExecution;
-    private LocalDateTime endDate;
+    private String description;
 
+    @OneToMany(mappedBy = "portfolio", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
-    private Boolean active = true;
+    private List<Asset> assets = new java.util.ArrayList<>();
 
     @CreationTimestamp
+    @Column(updatable = false)
     private LocalDateTime createdAt;
 
     @UpdateTimestamp
     private LocalDateTime updatedAt;
 }
-

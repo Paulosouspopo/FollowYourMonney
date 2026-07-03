@@ -1,7 +1,5 @@
-package com.portfolio.tracker.repository;
+package com.portfolio.tracker.asset;
 
-import com.portfolio.tracker.entity.Asset;
-import com.portfolio.tracker.enums.AssetType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 

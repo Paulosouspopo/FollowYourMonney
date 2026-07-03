@@ -1,4 +1,4 @@
-package com.portfolio.tracker.entity;
+package com.portfolio.tracker.user;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -6,6 +6,8 @@ import java.util.UUID;
 
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
+
+import com.portfolio.tracker.portfolio.Portfolio;
 
 import jakarta.persistence.Id;
 import jakarta.persistence.CascadeType;

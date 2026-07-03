@@ -1,10 +1,13 @@
-package com.portfolio.tracker.entity;
+package com.portfolio.tracker.asset;
 
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
-import com.portfolio.tracker.enums.AssetType;
+
+import com.portfolio.tracker.entity.RecurringInvestment;
+import com.portfolio.tracker.entity.Transaction;
+import com.portfolio.tracker.portfolio.Portfolio;
 
 import jakarta.persistence.Id;
 import java.time.LocalDateTime;
