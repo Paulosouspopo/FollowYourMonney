@@ -4,12 +4,7 @@ import com.portfolio.tracker.asset.AssetType;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
-import java.util.UUID;
-
-public record AssetCreateRequest(
-
-        @NotNull(message = "L'id du portfolio est obligatoire")
-        UUID portfolioId,
+public record AssetUpdateRequest(
 
         @NotBlank(message = "Le symbole est obligatoire")
         String symbol,

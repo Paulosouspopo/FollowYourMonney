@@ -11,4 +11,6 @@ public interface AssetRepository extends JpaRepository<Asset, UUID> {
     List<Asset> findByPortfolioId(UUID portfolioId);
     List<Asset> findByPortfolioIdAndAssetType(UUID portfolioId, AssetType assetType);
     List<Asset> findBySymbol(String symbol);
+    Boolean existsBySymbolAndPortfolioId(String symbol, UUID portfolioId);
+    Boolean existsBySymbolAndPortfolioIdAndIdNot(String symbol, UUID portfolioId, UUID id);
 }

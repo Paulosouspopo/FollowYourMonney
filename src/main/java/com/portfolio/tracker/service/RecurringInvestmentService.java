@@ -1,10 +1,11 @@
 package com.portfolio.tracker.service;
 
 import com.portfolio.tracker.entity.RecurringInvestment;
-import com.portfolio.tracker.entity.Transaction;
-import com.portfolio.tracker.enums.TransactionType;
 import com.portfolio.tracker.repository.RecurringInvestmentRepository;
-import com.portfolio.tracker.repository.TransactionRepository;
+import com.portfolio.tracker.transaction.Transaction;
+import com.portfolio.tracker.transaction.TransactionRepository;
+import com.portfolio.tracker.transaction.TransactionType;
+
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;

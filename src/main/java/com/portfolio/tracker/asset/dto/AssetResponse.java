@@ -7,6 +7,7 @@ import java.util.UUID;
 
 public record AssetResponse(
         UUID id,
+        UUID portfolioId,
         String symbol,
         String name,
         AssetType assetType,
