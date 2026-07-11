@@ -1,6 +1,5 @@
-package com.portfolio.tracker.repository;
+package com.portfolio.tracker.recurringinvestment;
 
-import com.portfolio.tracker.entity.RecurringInvestment;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 

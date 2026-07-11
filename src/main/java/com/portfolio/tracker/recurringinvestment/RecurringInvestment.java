@@ -1,13 +1,11 @@
-package com.portfolio.tracker.entity;
+package com.portfolio.tracker.recurringinvestment;
 
 import com.portfolio.tracker.asset.Asset;
-import com.portfolio.tracker.enums.Frequency;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
-import jakarta.persistence.Id;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -48,4 +46,3 @@ public class RecurringInvestment {
     @UpdateTimestamp
     private LocalDateTime updatedAt;
 }
-

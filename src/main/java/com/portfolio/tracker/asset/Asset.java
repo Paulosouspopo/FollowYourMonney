@@ -5,8 +5,8 @@ import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
-import com.portfolio.tracker.entity.RecurringInvestment;
 import com.portfolio.tracker.portfolio.Portfolio;
+import com.portfolio.tracker.recurringinvestment.RecurringInvestment;
 import com.portfolio.tracker.transaction.Transaction;
 
 import jakarta.persistence.Id;
