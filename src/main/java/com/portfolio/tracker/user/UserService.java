@@ -1,5 +1,6 @@
 package com.portfolio.tracker.user;
 
+import com.portfolio.tracker.shared.exception.ResourceAlreadyExistsException;
 import com.portfolio.tracker.shared.exception.ResourceNotFoundException;
 import com.portfolio.tracker.user.dto.UserCreateRequest;
 import com.portfolio.tracker.user.dto.UserResponse;
@@ -41,10 +42,10 @@ public class UserService {
     @Transactional
     public UserResponse create(UserCreateRequest request) {
         if (userRepository.existsByEmail(request.email())) {
-            throw new IllegalArgumentException("Un utilisateur avec cet email existe déjà");
+            throw new ResourceAlreadyExistsException("Un utilisateur avec cet email existe déjà");
         }
         if (userRepository.existsByUsername(request.username())) {
-            throw new IllegalArgumentException("Ce nom d'utilisateur est déjà pris");
+            throw new ResourceAlreadyExistsException("Ce nom d'utilisateur est déjà pris");
         }
 
         String hashedPassword = passwordEncoder.encode(request.password());
