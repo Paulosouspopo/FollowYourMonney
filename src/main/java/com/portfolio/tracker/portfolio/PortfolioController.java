@@ -3,10 +3,13 @@ package com.portfolio.tracker.portfolio;
 import com.portfolio.tracker.portfolio.dto.PortfolioCreateRequest;
 import com.portfolio.tracker.portfolio.dto.PortfolioResponse;
 import com.portfolio.tracker.portfolio.dto.PortfolioUpdateRequest;
+import com.portfolio.tracker.security.CustomUserDetails;
+
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -25,8 +28,8 @@ public class PortfolioController {
     }
 
     @GetMapping
-    public ResponseEntity<List<PortfolioResponse>> getByUser(@RequestParam UUID userId) {
-        return ResponseEntity.ok(portfolioService.findByUserId(userId));
+    public ResponseEntity<List<PortfolioResponse>> getByUser(@AuthenticationPrincipal CustomUserDetails userDetails) {
+        return ResponseEntity.ok(portfolioService.findByUserId(userDetails.getId()));
     }
 
     @PostMapping
