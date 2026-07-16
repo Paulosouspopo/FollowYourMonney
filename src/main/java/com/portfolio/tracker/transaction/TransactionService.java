@@ -23,11 +23,7 @@ public class TransactionService {
     private final AssetRepository assetRepository;
     private final TransactionMapper transactionMapper;
 
-    public TransactionResponse findById(UUID id) {
-        return transactionMapper.toResponse(getTransactionOrThrow(id));
-    }
-
-    public List<TransactionResponse> findByAssetId(UUID assetId) {
+    public List<TransactionResponse> findByAssetId(UUID assetId, UUID userId) {
         if (!assetRepository.existsById(assetId)) {
             throw new ResourceNotFoundException("Asset", assetId);
         }
@@ -36,10 +32,17 @@ public class TransactionService {
                 .toList();
     }
 
+    public TransactionResponse findByIdAndUserId(UUID transactionId, UUID userId) {
+        Transaction transaction = transactionRepository.findByIdAndUserId(transactionId, userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Transaction non accessible"));
+
+        return transactionMapper.toResponse(transaction);
+    }
+
     @Transactional
-    public TransactionResponse create(TransactionCreateRequest request) {
-        Asset asset = assetRepository.findById(request.assetId())
-                .orElseThrow(() -> new ResourceNotFoundException("Asset", request.assetId()));
+    public TransactionResponse create(TransactionCreateRequest request, UUID userId) {
+        Asset asset = assetRepository.findByIdAndUserId(request.assetId(), userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Asset non accessible"));
 
         BigDecimal totalAmount = request.quantity().multiply(request.pricePerUnit());
 
@@ -49,8 +52,9 @@ public class TransactionService {
     }
 
     @Transactional
-    public TransactionResponse update(UUID id, TransactionUpdateRequest request) {
-        Transaction existing = getTransactionOrThrow(id);
+    public TransactionResponse update(UUID transactionId, TransactionUpdateRequest request, UUID userId) {
+        Transaction existing = transactionRepository.findByIdAndUserId(transactionId, userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Transaction non accessible"));
 
         BigDecimal totalAmount = request.quantity().multiply(request.pricePerUnit());
 
@@ -67,15 +71,10 @@ public class TransactionService {
     }
 
     @Transactional
-    public void deleteById(UUID id) {
-        if (!transactionRepository.existsById(id)) {
-            throw new ResourceNotFoundException("Transaction", id);
-        }
-        transactionRepository.deleteById(id);
-    }
+    public void deleteById(UUID transactionId, UUID userId) {
+        Transaction transaction = transactionRepository.findByIdAndUserId(transactionId, userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Transaction non accessible"));
 
-    private Transaction getTransactionOrThrow(UUID id) {
-        return transactionRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Transaction", id));
+        transactionRepository.delete(transaction);
     }
 }
