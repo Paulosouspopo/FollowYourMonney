@@ -23,23 +23,24 @@ public class PortfolioService {
     private final UserRepository userRepository;
     private final PortfolioMapper portfolioMapper;
 
-    public PortfolioResponse findById(UUID id) {
-        Portfolio portfolio = getPortfolioOrThrow(id);
-        return portfolioMapper.toResponse(portfolio);
-    }
-
     public List<PortfolioResponse> findByUserId(UUID userId) {
         return portfolioRepository.findByUserId(userId).stream()
                 .map(portfolioMapper::toResponse)
                 .toList();
     }
 
-    @Transactional
-    public PortfolioResponse create(PortfolioCreateRequest request) {
-        User user = userRepository.findById(request.userId())
-                .orElseThrow(() -> new ResourceNotFoundException("Utilisateur", request.userId()));
+    public PortfolioResponse findByIdAndUserId(UUID portfolioId, UUID userId) {
+        Portfolio portfolio = portfolioRepository.findByIdAndUserId(portfolioId, userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Portfolio non accessible"));
+        return portfolioMapper.toResponse(portfolio);
+    }
 
-        if (portfolioRepository.existsByNameAndUserId(request.name(), request.userId())) {
+    @Transactional
+    public PortfolioResponse create(PortfolioCreateRequest request, UUID userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Utilisateur", userId));
+
+        if (portfolioRepository.existsByNameAndUserId(request.name(), userId)) {
             throw new ResourceAlreadyExistsException(
                     "Un portefeuille nommé '" + request.name() + "' existe déjà pour cet utilisateur");
         }
@@ -50,35 +51,31 @@ public class PortfolioService {
     }
 
     @Transactional
-    public PortfolioResponse update(UUID id, PortfolioUpdateRequest request) {
-        Portfolio existingPortfolio = getPortfolioOrThrow(id);
+    public PortfolioResponse update(UUID portfolioId, PortfolioUpdateRequest request, UUID userId) {
+        Portfolio portfolio = portfolioRepository.findByIdAndUserId(portfolioId, userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Portfolio non accessible"));
 
         boolean nameTaken = portfolioRepository.existsByNameAndUserIdAndIdNot(
-                request.name(), existingPortfolio.getUser().getId(), id);
+                request.name(), userId, portfolioId);
 
         if (nameTaken) {
             throw new ResourceAlreadyExistsException(
                     "Un portefeuille nommé '" + request.name() + "' existe déjà pour cet utilisateur");
         }
 
-        existingPortfolio.setName(request.name());
-        existingPortfolio.setDescription(request.description());
-        existingPortfolio.setType(request.type());
+        portfolio.setName(request.name());
+        portfolio.setDescription(request.description());
+        portfolio.setType(request.type());
 
-        Portfolio saved = portfolioRepository.save(existingPortfolio);
+        Portfolio saved = portfolioRepository.save(portfolio);
         return portfolioMapper.toResponse(saved);
     }
 
     @Transactional
-    public void deleteById(UUID id) {
-        if (!portfolioRepository.existsById(id)) {
-            throw new ResourceNotFoundException("Portfolio", id);
-        }
-        portfolioRepository.deleteById(id);
-    }
+    public void deleteById(UUID portfolioId, UUID userId) {
+        Portfolio portfolio = portfolioRepository.findByIdAndUserId(portfolioId, userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Portfolio non accessible"));
 
-    private Portfolio getPortfolioOrThrow(UUID id) {
-        return portfolioRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Portfolio", id));
+        portfolioRepository.delete(portfolio);
     }
 }

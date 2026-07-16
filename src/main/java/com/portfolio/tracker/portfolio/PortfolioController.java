@@ -22,32 +22,40 @@ public class PortfolioController {
 
     private final PortfolioService portfolioService;
 
-    @GetMapping("/{id}")
-    public ResponseEntity<PortfolioResponse> getById(@PathVariable UUID id) {
-        return ResponseEntity.ok(portfolioService.findById(id));
-    }
-
     @GetMapping
-    public ResponseEntity<List<PortfolioResponse>> getByUser(@AuthenticationPrincipal CustomUserDetails userDetails) {
+    public ResponseEntity<List<PortfolioResponse>> getByUser(
+            @AuthenticationPrincipal CustomUserDetails userDetails) {
         return ResponseEntity.ok(portfolioService.findByUserId(userDetails.getId()));
     }
 
+    @GetMapping("/{id}")
+    public ResponseEntity<PortfolioResponse> getById(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal CustomUserDetails userDetails) {
+        return ResponseEntity.ok(portfolioService.findByIdAndUserId(id, userDetails.getId()));
+    }
+
     @PostMapping
-    public ResponseEntity<PortfolioResponse> create(@Valid @RequestBody PortfolioCreateRequest request) {
-        PortfolioResponse created = portfolioService.create(request);
+    public ResponseEntity<PortfolioResponse> create(
+            @Valid @RequestBody PortfolioCreateRequest request,
+            @AuthenticationPrincipal CustomUserDetails userDetails) {
+        PortfolioResponse created = portfolioService.create(request, userDetails.getId());
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
     @PutMapping("/{id}")
     public ResponseEntity<PortfolioResponse> update(
             @PathVariable UUID id,
-            @Valid @RequestBody PortfolioUpdateRequest request) {
-        return ResponseEntity.ok(portfolioService.update(id, request));
+            @Valid @RequestBody PortfolioUpdateRequest request,
+            @AuthenticationPrincipal CustomUserDetails userDetails) {
+        return ResponseEntity.ok(portfolioService.update(id, request, userDetails.getId()));
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable UUID id) {
-        portfolioService.deleteById(id);
+    public ResponseEntity<Void> delete(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal CustomUserDetails userDetails) {
+        portfolioService.deleteById(id, userDetails.getId());
         return ResponseEntity.noContent().build();
     }
 }
