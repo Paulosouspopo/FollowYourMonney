@@ -2,16 +2,16 @@ package com.portfolio.tracker.transaction.dto;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.util.UUID;
 
 import com.portfolio.tracker.transaction.TransactionType;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
 public record TransactionCreateRequest(
 
-        @NotNull(message = "L'id de l'asset est obligatoire") 
-        UUID assetId,
+        @NotBlank(message = "Le symbole de l'asset est obligatoire")
+        String symbol,  // "AAPL" ou "BTC"
 
         @NotNull(message = "Le type de transaction est obligatoire") 
         TransactionType type,

@@ -1,12 +1,11 @@
 package com.portfolio.tracker.asset;
 
+import com.portfolio.tracker.portfolio.Portfolio;
+import com.portfolio.tracker.portfolio.PortfolioRepository;
+import com.portfolio.tracker.shared.exception.ResourceNotFoundException;
 import com.portfolio.tracker.asset.dto.AssetCreateRequest;
 import com.portfolio.tracker.asset.dto.AssetResponse;
 import com.portfolio.tracker.asset.dto.AssetUpdateRequest;
-import com.portfolio.tracker.portfolio.Portfolio;
-import com.portfolio.tracker.portfolio.PortfolioRepository;
-import com.portfolio.tracker.shared.exception.ResourceAlreadyExistsException;
-import com.portfolio.tracker.shared.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,27 +22,30 @@ public class AssetService {
     private final PortfolioRepository portfolioRepository;
     private final AssetMapper assetMapper;
 
-    public AssetResponse findById(UUID id) {
-        return assetMapper.toResponse(getAssetOrThrow(id));
-    }
-
-    public List<AssetResponse> findByPortfolioId(UUID portfolioId) {
-        if (!portfolioRepository.existsById(portfolioId)) {
-            throw new ResourceNotFoundException("Portfolio", portfolioId);
+    public List<AssetResponse> findByPortfolioIdAndUserId(UUID portfolioId, UUID userId) {
+        if (!portfolioRepository.findByIdAndUserId(portfolioId, userId).isPresent()) {
+            throw new ResourceNotFoundException("Portfolio non accessible");
         }
-        return assetRepository.findByPortfolioId(portfolioId).stream()
+        
+        return assetRepository.findByPortfolioIdAndUserId(portfolioId, userId).stream()
                 .map(assetMapper::toResponse)
                 .toList();
     }
 
-    @Transactional
-    public AssetResponse create(AssetCreateRequest request) {
-        Portfolio portfolio = portfolioRepository.findById(request.portfolioId())
-                .orElseThrow(() -> new ResourceNotFoundException("Portfolio", request.portfolioId()));
+    public AssetResponse findByIdAndUserId(UUID assetId, UUID userId) {
+        Asset asset = assetRepository.findByIdAndUserId(assetId, userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Asset non accessible"));
+        
+        return assetMapper.toResponse(asset);
+    }
 
-        if (assetRepository.existsBySymbolAndPortfolioId(request.symbol(), request.portfolioId())) {
-            throw new ResourceAlreadyExistsException(
-                    "Un asset avec le symbole '" + request.symbol() + "' existe déjà dans ce portfolio");
+    @Transactional
+    public AssetResponse create(UUID portfolioId, AssetCreateRequest request, UUID userId) {
+        Portfolio portfolio = portfolioRepository.findByIdAndUserId(portfolioId, userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Portfolio non accessible"));
+
+        if (assetRepository.existsBySymbolAndPortfolioIdAndUserId(request.symbol(), portfolioId, userId)) {
+            throw new IllegalArgumentException("Un asset avec ce symbole existe déjà dans ce portfolio");
         }
 
         Asset asset = assetMapper.toEntity(request, portfolio);
@@ -52,13 +54,18 @@ public class AssetService {
     }
 
     @Transactional
-    public AssetResponse update(UUID id, AssetUpdateRequest request) {
-        Asset existing = getAssetOrThrow(id);
+    public AssetResponse update(UUID assetId, AssetUpdateRequest request, UUID userId) {
+        Asset existing = assetRepository.findByIdAndUserId(assetId, userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Asset non accessible"));
 
-        UUID portfolioId = existing.getPortfolio().getId();
-        if (assetRepository.existsBySymbolAndPortfolioIdAndIdNot(request.symbol(), portfolioId, id)) {
-            throw new ResourceAlreadyExistsException(
-                    "Un asset avec le symbole '" + request.symbol() + "' existe déjà dans ce portfolio");
+        // Vérifier l'unicité du symbole si modifié
+        if (!existing.getSymbol().equals(request.symbol()) && 
+            assetRepository.existsBySymbolAndPortfolioIdAndUserIdAndIdNot(
+                request.symbol(), 
+                existing.getPortfolio().getId(), 
+                userId, 
+                assetId)) {
+            throw new IllegalArgumentException("Un asset avec ce symbole existe déjà dans ce portfolio");
         }
 
         existing.setSymbol(request.symbol());
@@ -71,15 +78,10 @@ public class AssetService {
     }
 
     @Transactional
-    public void deleteById(UUID id) {
-        if (!assetRepository.existsById(id)) {
-            throw new ResourceNotFoundException("Asset", id);
-        }
-        assetRepository.deleteById(id);
-    }
-
-    private Asset getAssetOrThrow(UUID id) {
-        return assetRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Asset", id));
+    public void deleteById(UUID assetId, UUID userId) {
+        Asset asset = assetRepository.findByIdAndUserId(assetId, userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Asset non accessible"));
+        
+        assetRepository.delete(asset);
     }
 }

@@ -11,16 +11,52 @@ import java.util.UUID;
 
 @Repository
 public interface AssetRepository extends JpaRepository<Asset, UUID> {
-    List<Asset> findByPortfolioId(UUID portfolioId);
 
-    List<Asset> findByPortfolioIdAndAssetType(UUID portfolioId, AssetType assetType);
+        /**
+         * Récupère tous les assets d'un utilisateur
+         */
+        @Query("SELECT a FROM Asset a WHERE a.portfolio.user.id = :userId")
+        List<Asset> findByUserId(@Param("userId") UUID userId);
 
-    List<Asset> findBySymbol(String symbol);
+        /**
+         * Récupère tous les assets d'un portfolio spécifique (avec vérification user)
+         */
+        @Query("SELECT a FROM Asset a WHERE a.portfolio.id = :portfolioId AND a.portfolio.user.id = :userId")
+        List<Asset> findByPortfolioIdAndUserId(@Param("portfolioId") UUID portfolioId, @Param("userId") UUID userId);
 
-    Boolean existsBySymbolAndPortfolioId(String symbol, UUID portfolioId);
+        /**
+         * Récupère un asset par ID (avec vérification user)
+         */
+        @Query("SELECT a FROM Asset a WHERE a.id = :assetId AND a.portfolio.user.id = :userId")
+        Optional<Asset> findByIdAndUserId(@Param("assetId") UUID assetId, @Param("userId") UUID userId);
 
-    Boolean existsBySymbolAndPortfolioIdAndIdNot(String symbol, UUID portfolioId, UUID id);
+        /**
+         * Cherche un asset par symbol et portfolio (avec vérification user)
+         */
+        @Query("SELECT a FROM Asset a WHERE a.symbol = :symbol AND a.portfolio.id = :portfolioId AND a.portfolio.user.id = :userId")
+        Optional<Asset> findBySymbolAndPortfolioIdAndUserId(@Param("symbol") String symbol,
+                        @Param("portfolioId") UUID portfolioId, @Param("userId") UUID userId);
 
-    @Query("SELECT a FROM Asset a WHERE a.id = :assetId AND a.portfolio.user.id = :userId")
-    Optional<Asset> findByIdAndUserId(@Param("assetId") UUID assetId, @Param("userId") UUID userId);
+        /**
+         * Vérifie si un asset avec ce symbol existe déjà dans le portfolio (avec
+         * vérification user)
+         */
+        @Query("SELECT CASE WHEN COUNT(a) > 0 THEN true ELSE false END FROM Asset a WHERE a.portfolio.id = :portfolioId AND a.symbol = :symbol AND a.portfolio.user.id = :userId")
+        boolean existsBySymbolAndPortfolioIdAndUserId(@Param("symbol") String symbol,
+                        @Param("portfolioId") UUID portfolioId, @Param("userId") UUID userId);
+
+        /**
+         * Vérifie si un asset avec ce symbol existe (excluant l'asset lui-même lors
+         * d'une update)
+         */
+        @Query("SELECT CASE WHEN COUNT(a) > 0 THEN true ELSE false END FROM Asset a WHERE a.portfolio.id = :portfolioId AND a.symbol = :symbol AND a.id != :assetId AND a.portfolio.user.id = :userId")
+        boolean existsBySymbolAndPortfolioIdAndUserIdAndIdNot(@Param("symbol") String symbol,
+                        @Param("portfolioId") UUID portfolioId, @Param("userId") UUID userId,
+                        @Param("assetId") UUID assetId);
+
+        /**
+         * Compte les assets d'un portfolio (avec vérification user)
+         */
+        @Query("SELECT COUNT(a) FROM Asset a WHERE a.portfolio.id = :portfolioId AND a.portfolio.user.id = :userId")
+        long countByPortfolioIdAndUserId(@Param("portfolioId") UUID portfolioId, @Param("userId") UUID userId);
 }
