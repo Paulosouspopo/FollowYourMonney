@@ -1,6 +1,8 @@
 package com.portfolio.tracker.recurringinvestment;
 
 import com.portfolio.tracker.asset.Asset;
+import com.portfolio.tracker.user.User;
+
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
@@ -21,6 +23,10 @@ public class RecurringInvestment {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
+
+    @ManyToOne
+    @JoinColumn(name = "user_id", nullable = false)
+    private User user;
 
     @ManyToOne
     @JoinColumn(name = "asset_id", nullable = false)

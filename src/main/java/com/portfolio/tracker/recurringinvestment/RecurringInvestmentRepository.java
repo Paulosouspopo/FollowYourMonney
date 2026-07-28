@@ -10,7 +10,10 @@ import java.util.UUID;
 @Repository
 public interface RecurringInvestmentRepository extends JpaRepository<RecurringInvestment, UUID> {
     List<RecurringInvestment> findByAssetId(UUID assetId);
+
     List<RecurringInvestment> findByActiveTrue();
+
     List<RecurringInvestment> findByActiveTrueAndNextExecutionBefore(LocalDateTime date);
-    List<RecurringInvestment> findByActiveAndNextExecutionBefore(Boolean active, LocalDateTime dateTime);
+
+    List<RecurringInvestment> findByUserId(UUID userId);
 }
