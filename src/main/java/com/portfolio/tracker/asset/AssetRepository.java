@@ -59,4 +59,9 @@ public interface AssetRepository extends JpaRepository<Asset, UUID> {
          */
         @Query("SELECT COUNT(a) FROM Asset a WHERE a.portfolio.id = :portfolioId AND a.portfolio.user.id = :userId")
         long countByPortfolioIdAndUserId(@Param("portfolioId") UUID portfolioId, @Param("userId") UUID userId);
+
+        @Query("SELECT DISTINCT a.symbol FROM Asset a")
+        List<String> findAllDistinctSymbols();
+
+        Asset findBySymbol(String symbol);
 }
