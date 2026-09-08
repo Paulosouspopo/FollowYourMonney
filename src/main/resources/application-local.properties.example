@@ -1,0 +1,4 @@
+# Copiez ce fichier en application-local.properties et renseignez vos valeurs.
+# application-local.properties est gitignore et ne doit JAMAIS etre commite.
+
+app.jwt.secret=CHANGE_ME_min_32_caracteres
