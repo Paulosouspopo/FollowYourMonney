@@ -13,8 +13,6 @@ import java.util.UUID;
 
 public interface AssetPriceRepository extends JpaRepository<AssetPrice, UUID> {
 
-        List<Asset> findBySymbol(String symbol);
-
         @Query("SELECT ap FROM AssetPrice ap WHERE ap.symbol = :symbol ORDER BY ap.lastUpdated DESC LIMIT 1")
         Optional<AssetPrice> findLatestBySymbol(@Param("symbol") String symbol);
 

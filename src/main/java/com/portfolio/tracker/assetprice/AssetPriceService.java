@@ -65,14 +65,13 @@ public class AssetPriceService {
             return false;
         }
 
-        Asset asset = assetRepository.findBySymbol(symbol);
-        if (asset == null) {
+        List<Asset> assets = assetRepository.findAllBySymbol(symbol);
+        if (assets.isEmpty()) {
             log.warn("No asset found for symbol: {}", symbol);
             return false;
         }
 
         Optional<MarketQuote> quote = marketDataProvider.getQuote(symbol);
-
         if (quote.isEmpty()) {
             log.warn("Failed to retrieve price for symbol: {}", symbol);
             return false;
@@ -80,7 +79,10 @@ public class AssetPriceService {
 
         MarketQuote q = quote.get();
         saveAssetPrice(q);
-        enrichAssetMetadataIfNeeded(asset, q);
+
+        // On enrichit tous les assets partageant ce symbole (un par user
+        // potentiellement)
+        assets.forEach(asset -> enrichAssetMetadataIfNeeded(asset, q));
 
         log.info("Price updated for {}: {} {}", q.symbol(), q.price(), q.currency());
         return true;
