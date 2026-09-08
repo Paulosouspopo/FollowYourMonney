@@ -1,6 +1,7 @@
 package com.portfolio.tracker.portfolio;
 
 import com.portfolio.tracker.portfolio.dto.PortfolioCreateRequest;
+import com.portfolio.tracker.portfolio.dto.PortfolioDetailResponse;
 import com.portfolio.tracker.portfolio.dto.PortfolioResponse;
 import com.portfolio.tracker.portfolio.dto.PortfolioUpdateRequest;
 import com.portfolio.tracker.security.CustomUserDetails;
@@ -29,7 +30,7 @@ public class PortfolioController {
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<PortfolioResponse> getById(
+    public ResponseEntity<PortfolioDetailResponse> getById( // ← PortfolioDetailResponse au lieu de PortfolioResponse
             @PathVariable UUID id,
             @AuthenticationPrincipal CustomUserDetails userDetails) {
         return ResponseEntity.ok(portfolioService.findByIdAndUserId(id, userDetails.getId()));

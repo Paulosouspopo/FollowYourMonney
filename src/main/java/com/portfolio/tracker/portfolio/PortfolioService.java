@@ -1,6 +1,7 @@
 package com.portfolio.tracker.portfolio;
 
 import com.portfolio.tracker.portfolio.dto.PortfolioCreateRequest;
+import com.portfolio.tracker.portfolio.dto.PortfolioDetailResponse;
 import com.portfolio.tracker.portfolio.dto.PortfolioResponse;
 import com.portfolio.tracker.portfolio.dto.PortfolioUpdateRequest;
 import com.portfolio.tracker.shared.exception.ResourceAlreadyExistsException;
@@ -29,10 +30,10 @@ public class PortfolioService {
                 .toList();
     }
 
-    public PortfolioResponse findByIdAndUserId(UUID portfolioId, UUID userId) {
+    public PortfolioDetailResponse findByIdAndUserId(UUID portfolioId, UUID userId) {
         Portfolio portfolio = portfolioRepository.findByIdAndUserId(portfolioId, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Portfolio non accessible"));
-        return portfolioMapper.toResponse(portfolio);
+        return portfolioMapper.toDetailResponse(portfolio); // ← toDetailResponse au lieu de toResponse
     }
 
     @Transactional

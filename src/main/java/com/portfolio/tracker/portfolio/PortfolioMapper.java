@@ -1,7 +1,9 @@
 package com.portfolio.tracker.portfolio;
 
 import com.portfolio.tracker.asset.AssetMapper;
+import com.portfolio.tracker.asset.dto.AssetResponse;
 import com.portfolio.tracker.portfolio.dto.PortfolioCreateRequest;
+import com.portfolio.tracker.portfolio.dto.PortfolioDetailResponse;
 import com.portfolio.tracker.portfolio.dto.PortfolioResponse;
 import com.portfolio.tracker.user.User;
 import lombok.RequiredArgsConstructor;
@@ -25,13 +27,24 @@ public class PortfolioMapper {
     }
 
     public PortfolioResponse toResponse(Portfolio portfolio) {
-        List<com.portfolio.tracker.asset.dto.AssetResponse> assets = portfolio.getAssets() == null
+        return new PortfolioResponse(
+                portfolio.getId(),
+                portfolio.getName(),
+                portfolio.getDescription(),
+                portfolio.getType(),
+                portfolio.getUser().getId(),
+                portfolio.getCreatedAt(),
+                portfolio.getUpdatedAt());
+    }
+
+    public PortfolioDetailResponse toDetailResponse(Portfolio portfolio) {
+        List<AssetResponse> assets = portfolio.getAssets() == null
                 ? List.of()
                 : portfolio.getAssets().stream()
-                    .map(assetMapper::toResponse)
-                    .toList();
+                        .map(assetMapper::toResponse)
+                        .toList();
 
-        return new PortfolioResponse(
+        return new PortfolioDetailResponse(
                 portfolio.getId(),
                 portfolio.getName(),
                 portfolio.getDescription(),
@@ -39,7 +52,6 @@ public class PortfolioMapper {
                 portfolio.getUser().getId(),
                 assets,
                 portfolio.getCreatedAt(),
-                portfolio.getUpdatedAt()
-        );
+                portfolio.getUpdatedAt());
     }
 }
