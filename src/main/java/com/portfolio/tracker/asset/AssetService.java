@@ -26,7 +26,7 @@ public class AssetService {
         if (!portfolioRepository.findByIdAndUserId(portfolioId, userId).isPresent()) {
             throw new ResourceNotFoundException("Portfolio non accessible");
         }
-        
+
         return assetRepository.findByPortfolioIdAndUserId(portfolioId, userId).stream()
                 .map(assetMapper::toResponse)
                 .toList();
@@ -35,7 +35,7 @@ public class AssetService {
     public AssetResponse findByIdAndUserId(UUID assetId, UUID userId) {
         Asset asset = assetRepository.findByIdAndUserId(assetId, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Asset non accessible"));
-        
+
         return assetMapper.toResponse(asset);
     }
 
@@ -58,19 +58,7 @@ public class AssetService {
         Asset existing = assetRepository.findByIdAndUserId(assetId, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Asset non accessible"));
 
-        // Vérifier l'unicité du symbole si modifié
-        if (!existing.getSymbol().equals(request.symbol()) && 
-            assetRepository.existsBySymbolAndPortfolioIdAndUserIdAndIdNot(
-                request.symbol(), 
-                existing.getPortfolio().getId(), 
-                userId, 
-                assetId)) {
-            throw new IllegalArgumentException("Un asset avec ce symbole existe déjà dans ce portfolio");
-        }
-
-        existing.setSymbol(request.symbol());
         existing.setName(request.name());
-        existing.setAssetType(request.assetType());
         existing.setCurrency(request.currency());
 
         Asset saved = assetRepository.save(existing);
@@ -81,7 +69,7 @@ public class AssetService {
     public void deleteById(UUID assetId, UUID userId) {
         Asset asset = assetRepository.findByIdAndUserId(assetId, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Asset non accessible"));
-        
+
         assetRepository.delete(asset);
     }
 }

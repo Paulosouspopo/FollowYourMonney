@@ -10,6 +10,8 @@ public record AssetResponse(
         UUID portfolioId,
         String symbol,
         String name,
+        String longName,
+        String exchangeName,
         AssetType assetType,
         String currency,
         LocalDateTime createdAt,

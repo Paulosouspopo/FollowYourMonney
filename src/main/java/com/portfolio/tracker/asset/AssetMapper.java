@@ -24,6 +24,8 @@ public class AssetMapper {
                 asset.getPortfolio().getId(),
                 asset.getSymbol(),
                 asset.getName(),
+                asset.getLongName(),
+                asset.getExchangeName(),
                 asset.getAssetType(),
                 asset.getCurrency(),
                 asset.getCreatedAt(),
