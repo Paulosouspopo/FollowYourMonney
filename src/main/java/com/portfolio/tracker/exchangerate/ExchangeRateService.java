@@ -13,6 +13,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
@@ -26,32 +27,41 @@ public class ExchangeRateService {
     private final ExchangeRateMapper exchangeRateMapper;
     private final ExchangeRateProvider exchangeRateProvider;
 
-    @Transactional(readOnly = true)
+    @Transactional
     public BigDecimal getRate(String fromCurrency, String toCurrency) {
         if (fromCurrency.equalsIgnoreCase(toCurrency)) {
             return BigDecimal.ONE;
         }
 
-        return exchangeRateRepository
+        Optional<BigDecimal> cached = exchangeRateRepository
                 .findFirstByFromCurrencyAndToCurrencyOrderByLastUpdatedDesc(fromCurrency, toCurrency)
-                .map(ExchangeRate::getRate)
-                .or(() -> exchangeRateRepository
-                        .findFirstByFromCurrencyAndToCurrencyOrderByLastUpdatedDesc(toCurrency, fromCurrency)
-                        .map(r -> BigDecimal.ONE.divide(r.getRate(), SCALE, RoundingMode.HALF_UP)))
-                .orElseGet(() -> fetchAndPersistRate(fromCurrency, toCurrency));
-    }
+                .map(ExchangeRate::getRate);
 
-    /** Fallback synchrone si aucun taux n'est encore en base (ex: nouvelle devise). */
-    private BigDecimal fetchAndPersistRate(String fromCurrency, String toCurrency) {
-        BigDecimal rate = exchangeRateProvider.getRate(fromCurrency, toCurrency)
+        if (cached.isPresent()) {
+            return cached.get();
+        }
+
+        Optional<BigDecimal> inverseCached = exchangeRateRepository
+                .findFirstByFromCurrencyAndToCurrencyOrderByLastUpdatedDesc(toCurrency, fromCurrency)
+                .map(rate -> BigDecimal.ONE.divide(rate.getRate(), SCALE, RoundingMode.HALF_UP));
+
+        if (inverseCached.isPresent()) {
+            return inverseCached.get();
+        }
+
+        // Fallback synchrone : devise inédite, jamais vue par le scheduler
+        log.warn("No cached rate for {} -> {}, fetching synchronously from provider", fromCurrency, toCurrency);
+        BigDecimal fetchedRate = exchangeRateProvider.getRate(fromCurrency, toCurrency)
                 .orElseThrow(() -> new ResourceNotFoundException(
-                        "Taux de change indisponible", fromCurrency + " -> " + toCurrency));
-        saveRate(fromCurrency, toCurrency, rate, "yahoo-fallback");
-        return rate;
+                        "Taux de change", fromCurrency + " -> " + toCurrency));
+
+        saveRate(fromCurrency, toCurrency, fetchedRate, "yahoo-fallback");
+        return fetchedRate;
     }
 
     public BigDecimal convert(BigDecimal amount, String fromCurrency, String toCurrency) {
-        return amount.multiply(getRate(fromCurrency, toCurrency)).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal rate = getRate(fromCurrency, toCurrency);
+        return amount.multiply(rate).setScale(2, RoundingMode.HALF_UP);
     }
 
     public ExchangeRateResponse findLatest(String fromCurrency, String toCurrency) {
@@ -62,7 +72,6 @@ public class ExchangeRateService {
         return exchangeRateMapper.toResponse(exchangeRate);
     }
 
-    /** SCHEDULER : rafraîchit toutes les paires suivies, une fois par heure. */
     @Scheduled(cron = "${exchange.rate.update.cron:0 0 * * * *}")
     @Transactional
     public void updateAllTrackedRates() {
