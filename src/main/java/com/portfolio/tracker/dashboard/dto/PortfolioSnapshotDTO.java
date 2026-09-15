@@ -5,22 +5,22 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 
+import com.portfolio.tracker.portfolio.PortfolioType;
+
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
 public class PortfolioSnapshotDTO {
-
-    private UUID id;
-    private String name;
-    private String type;                        // PortfolioType (PEA, CTO, CRYPTO, etc.)
-    
-    private BigDecimal currentValue;            // Valeur actuelle
-    private BigDecimal investedAmount;          // Montant investi
-    private BigDecimal gainLoss;                // Gain/perte
+    private UUID portfolioId;
+    private String portfolioName;
+    private PortfolioType portfolioType;
+    private BigDecimal currentValue;
+    private BigDecimal investedAmount;
+    private BigDecimal gainLoss;
     private BigDecimal gainLossPercentage;
-    
-    private int assetCount;                     // Nombre d'actifs
-    private List<AssetPerformanceDTO> assets;   // Détail des actifs du portefeuille
+    private int assetCount;
+    private List<AssetPerformanceDTO> assets;
+    private String currency;
 }

@@ -2,7 +2,7 @@ package com.portfolio.tracker.dashboard.dto;
 
 import lombok.*;
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
+import java.time.LocalDate;
 
 @Getter
 @Setter
@@ -10,8 +10,9 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 @Builder
 public class EvolutionPointDTO {
-
-    private LocalDateTime date;
-    private BigDecimal portfolioValue;      // Valeur totale à cette date
-    private BigDecimal gainLoss;            // Gain/perte cumulé à cette date
+    private LocalDate date;
+    private BigDecimal totalValue;
+    private BigDecimal investedAmount;
+    private BigDecimal gainLoss;
+    private BigDecimal gainLossPercentage;
 }

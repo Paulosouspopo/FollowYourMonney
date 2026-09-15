@@ -1,5 +1,6 @@
 package com.portfolio.tracker.transaction;
 
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -18,14 +19,33 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
 
     @Query("SELECT t FROM Transaction t WHERE t.id = :transactionId AND t.asset.portfolio.user.id = :userId")
     Optional<Transaction> findByIdAndUserId(@Param("transactionId") UUID transactionId, @Param("userId") UUID userId);
-    
+
     @Query("SELECT t FROM Transaction t WHERE t.asset.id = :assetId AND t.asset.portfolio.user.id = :userId")
     List<Transaction> findByAssetIdAndUserId(@Param("assetId") UUID assetId, @Param("userId") UUID userId);
 
     @Query("SELECT t FROM Transaction t " +
-           "JOIN t.asset a " +
-           "JOIN a.portfolio p " +
-           "WHERE p.user.id = :userId " +
-           "ORDER BY t.transactionDate DESC")
+            "JOIN t.asset a " +
+            "JOIN a.portfolio p " +
+            "WHERE p.user.id = :userId " +
+            "ORDER BY t.transactionDate DESC")
     List<Transaction> findByUserIdOrderByTransactionDateDesc(@Param("userId") UUID userId);
+
+    @Query("""
+            SELECT t FROM Transaction t
+            JOIN FETCH t.asset a
+            WHERE a.portfolio.id = :portfolioId
+              AND a.portfolio.user.id = :userId
+            ORDER BY t.transactionDate ASC
+            """)
+    List<Transaction> findByPortfolioIdAndUserId(@Param("portfolioId") UUID portfolioId,
+            @Param("userId") UUID userId);
+
+    @Query("""
+            SELECT t FROM Transaction t
+            JOIN FETCH t.asset a
+            JOIN FETCH a.portfolio p
+            WHERE p.user.id = :userId
+            ORDER BY t.transactionDate DESC
+            """)
+    List<Transaction> findRecentByUserId(@Param("userId") UUID userId, Pageable pageable);
 }
