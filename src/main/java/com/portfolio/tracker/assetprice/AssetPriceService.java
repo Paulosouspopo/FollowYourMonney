@@ -142,7 +142,7 @@ public class AssetPriceService {
             log.warn("getLatestPrice called with invalid symbol");
             return Optional.empty();
         }
-        return assetPriceRepository.findLatestBySymbol(symbol);
+        return assetPriceRepository.findTopBySymbolOrderByLastUpdatedDesc(symbol);
     }
 
     public List<AssetPrice> getLatestPrices(String symbol, int limit) {
@@ -170,7 +170,7 @@ public class AssetPriceService {
             log.warn("getPricesForPeriod: startDate is after endDate");
             return List.of();
         }
-        return assetPriceRepository.findBySymbolAndLastUpdatedBetween(symbol, startDate, endDate);
+        return assetPriceRepository.findBySymbolAndLastUpdatedBetweenOrderByLastUpdatedAsc(symbol, startDate, endDate);
     }
 
     public boolean refreshPriceForSymbol(String symbol) {

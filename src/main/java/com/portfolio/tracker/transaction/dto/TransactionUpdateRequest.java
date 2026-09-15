@@ -1,25 +1,27 @@
 package com.portfolio.tracker.transaction.dto;
 
 import com.portfolio.tracker.transaction.TransactionType;
-import jakarta.validation.constraints.DecimalMin;
-import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.PastOrPresent;
-import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.*;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
+/**
+ * La devise n'est volontairement pas modifiable : changer la devise d'une
+ * opération passée invaliderait le taux historique figé. Il faut supprimer
+ * puis recréer la transaction.
+ */
 public record TransactionUpdateRequest(
 
         @NotNull(message = "Le type de transaction est obligatoire")
         TransactionType type,
 
         @NotNull(message = "La quantité est obligatoire")
-        @DecimalMin(value = "0.0", inclusive = true, message = "La quantité doit être positive ou nulle")
+        @DecimalMin(value = "0.0", message = "La quantité doit être positive ou nulle")
         BigDecimal quantity,
 
-        @NotNull(message = "Le prix unitaire est obligatoire")
-        @DecimalMin(value = "0.0", inclusive = true, message = "Le prix unitaire doit être positif ou nul")
+        @NotNull(message = "Le prix par unité est obligatoire")
+        @DecimalMin(value = "0.0", message = "Le prix par unité doit être positif ou nul")
         BigDecimal pricePerUnit,
 
         @DecimalMin(value = "0.0", message = "Les frais doivent être positifs ou nuls")
@@ -31,4 +33,3 @@ public record TransactionUpdateRequest(
         @Size(max = 500, message = "Les notes ne doivent pas dépasser 500 caractères")
         String notes
 ) {}
-

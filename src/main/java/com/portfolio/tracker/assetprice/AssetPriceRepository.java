@@ -1,53 +1,79 @@
 package com.portfolio.tracker.assetprice;
 
+import com.portfolio.tracker.assetprice.dto.LatestPriceProjection;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface AssetPriceRepository extends JpaRepository<AssetPrice, UUID> {
 
-        @Query("SELECT ap FROM AssetPrice ap WHERE ap.symbol = :symbol ORDER BY ap.lastUpdated DESC LIMIT 1")
-        Optional<AssetPrice> findLatestBySymbol(@Param("symbol") String symbol);
+    // ------------------------------------------------- dernier prix (unitaire)
 
-        @Query(value = "SELECT * FROM asset_prices WHERE symbol = :symbol ORDER BY last_updated DESC LIMIT :limit", nativeQuery = true)
-        List<AssetPrice> findLatestPricesBySymbol(@Param("symbol") String symbol, @Param("limit") int limit);
+    /** Dernier prix connu pour un symbole. */
+    Optional<AssetPrice> findTopBySymbolOrderByLastUpdatedDesc(String symbol);
 
-        @Query("SELECT DISTINCT ap.symbol FROM AssetPrice ap")
-        List<String> findAllDistinctSymbols();
+    /** Dernier prix connu à une date donnée (valorisation historique). */
+    @Query("""
+            SELECT ap FROM AssetPrice ap
+            WHERE ap.symbol = :symbol AND ap.lastUpdated <= :asOf
+            ORDER BY ap.lastUpdated DESC
+            LIMIT 1
+            """)
+    Optional<AssetPrice> findLatestBySymbolAsOf(@Param("symbol") String symbol,
+                                                @Param("asOf") LocalDateTime asOf);
 
-        long countBySymbol(String symbol);
+    // ----------------------------------------------------- dernier prix (bulk)
 
-        List<AssetPrice> findBySymbolAndLastUpdatedAfter(String symbol, LocalDateTime date);
+    /**
+     * Derniers prix de N symboles en UNE requête (DISTINCT ON PostgreSQL).
+     * Élimine le N+1 de la valorisation.
+     */
+    @Query(value = """
+            SELECT DISTINCT ON (symbol)
+                   symbol AS symbol, price AS price,
+                   currency AS currency, last_updated AS lastUpdated
+            FROM asset_prices
+            WHERE symbol IN (:symbols)
+            ORDER BY symbol, last_updated DESC
+            """, nativeQuery = true)
+    List<LatestPriceProjection> findLatestForSymbols(@Param("symbols") Collection<String> symbols);
 
-        List<AssetPrice> findBySymbolAndLastUpdatedBetweenOrderByLastUpdatedAsc(
-                        String symbol,
-                        LocalDateTime start,
-                        LocalDateTime end);
+    /** Idem, mais à une date donnée (backfill / snapshots passés). */
+    @Query(value = """
+            SELECT DISTINCT ON (symbol)
+                   symbol AS symbol, price AS price,
+                   currency AS currency, last_updated AS lastUpdated
+            FROM asset_prices
+            WHERE symbol IN (:symbols) AND last_updated <= :asOf
+            ORDER BY symbol, last_updated DESC
+            """, nativeQuery = true)
+    List<LatestPriceProjection> findLatestForSymbolsAsOf(@Param("symbols") Collection<String> symbols,
+                                                         @Param("asOf") LocalDateTime asOf);
 
-        List<AssetPrice> findBySymbolOrderByLastUpdatedDesc(String symbol);
+    // --------------------------------------------------------------- historique
 
-        Optional<AssetPrice> findTopBySymbolOrderByLastUpdatedDesc(String symbol);
+    /** Série temporelle d'un symbole, paginée. */
+    List<AssetPrice> findBySymbolAndLastUpdatedBetweenOrderByLastUpdatedAsc(
+            String symbol, LocalDateTime start, LocalDateTime end);
 
-        @Query("SELECT a FROM AssetPrice a " +
-                        "WHERE a.symbol = :symbol " +
-                        "AND a.lastUpdated <= :date " +
-                        "ORDER BY a.lastUpdated DESC " +
-                        "LIMIT 1")
-        Optional<AssetPrice> findTopBySymbolAndLastUpdatedLessThanEqualOrderByLastUpdatedDesc(
-                        @Param("symbol") String symbol,
-                        @Param("date") LocalDateTime date);
+    /** Historique récent paginé (remplace findLatestPricesBySymbol + limit). */
+    List<AssetPrice> findBySymbolOrderByLastUpdatedDesc(String symbol, Pageable pageable);
 
-        @Query("SELECT a FROM AssetPrice a " +
-                        "WHERE a.symbol = :symbol " +
-                        "AND a.lastUpdated BETWEEN :startDate AND :endDate " +
-                        "ORDER BY a.lastUpdated ASC")
-        List<AssetPrice> findBySymbolAndLastUpdatedBetween(
-                        @Param("symbol") String symbol,
-                        @Param("startDate") LocalDateTime startDate,
-                        @Param("endDate") LocalDateTime endDate);
+    /** Bornes de l'historique disponible, pour dimensionner un backfill. */
+    @Query("SELECT MIN(ap.lastUpdated) FROM AssetPrice ap")
+    Optional<LocalDateTime> findEarliestPriceDate();
+
+    // ---------------------------------------------------------------- métriques
+
+    @Query("SELECT DISTINCT ap.symbol FROM AssetPrice ap")
+    List<String> findAllDistinctSymbols();
+
+    long countBySymbol(String symbol);
 }

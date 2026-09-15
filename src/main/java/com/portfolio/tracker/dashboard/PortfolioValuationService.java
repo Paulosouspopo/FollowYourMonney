@@ -1,260 +1,272 @@
 package com.portfolio.tracker.dashboard;
 
 import com.portfolio.tracker.asset.Asset;
-import com.portfolio.tracker.asset.AssetRepository;
-import com.portfolio.tracker.assetprice.AssetPrice;
 import com.portfolio.tracker.assetprice.AssetPriceRepository;
-import com.portfolio.tracker.dashboard.dto.AssetPerformanceDTO;
-import com.portfolio.tracker.dashboard.dto.PortfolioSnapshotDTO;
-import com.portfolio.tracker.exchangerate.ExchangeRateService;
+import com.portfolio.tracker.assetprice.dto.LatestPriceProjection;
+import com.portfolio.tracker.dashboard.dto.*;
 import com.portfolio.tracker.portfolio.Portfolio;
+import com.portfolio.tracker.shared.CurrencyConverter;
+import com.portfolio.tracker.shared.MoneyConstants;
 import com.portfolio.tracker.transaction.Transaction;
 import com.portfolio.tracker.transaction.TransactionRepository;
-import com.portfolio.tracker.transaction.TransactionType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
+import java.time.LocalDateTime;
 import java.util.*;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
+/**
+ * Moteur de valorisation. Toute la performance de l'application repose ici.
+ *
+ * Principes :
+ *  1. Une seule requête pour toutes les transactions concernées (JOIN FETCH),
+ *     une seule requête pour tous les derniers prix (DISTINCT ON). Aucun N+1.
+ *  2. Le coût d'une position est calculé au CUMP (coût unitaire moyen pondéré),
+ *     recalculé transaction par transaction, dans l'ordre chronologique.
+ *  3. L'investi (investedEur) reflète le taux de change du JOUR DE L'ACHAT
+ *     (figé sur la transaction). La valeur courante (currentValueEur) utilise
+ *     le taux du jour. C'est volontaire : le montant que j'ai sorti de ma poche
+ *     ne bouge pas rétroactivement parce que l'euro a fluctué depuis.
+ *  4. Un prix manquant ne fait pas planter la valorisation : la position est
+ *     valorisée à 0 et signalée via {@code priceMissing}.
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 @Transactional(readOnly = true)
 public class PortfolioValuationService {
 
-    private static final int MONEY_SCALE = 2;
-    private static final int QTY_SCALE = 8;
-    private static final int PCT_SCALE = 4;
-    private static final RoundingMode RM = RoundingMode.HALF_UP;
-
-    private final AssetRepository assetRepository;
     private final TransactionRepository transactionRepository;
     private final AssetPriceRepository assetPriceRepository;
-    private final ExchangeRateService exchangeRateService;
+    private final CurrencyConverter currencyConverter;
 
     /**
-     * Valorise un portefeuille complet à l'instant T.
-     * Les transactions sont chargées en une seule requête puis groupées en mémoire
-     * pour éviter le N+1 (une requête par asset).
+     * Valorise un ou tous les portefeuilles d'un utilisateur, à une date donnée.
+     *
+     * @param portfolioIdOrNull null = tous les portefeuilles de l'utilisateur
+     * @param asOf              null = maintenant (utile pour backfill/historique)
      */
-    public PortfolioSnapshotDTO valuate(Portfolio portfolio, String baseCurrency) {
-        UUID userId = portfolio.getUser().getId();
+    public ValuationResult valuate(UUID userId, UUID portfolioIdOrNull, LocalDateTime asOf) {
 
-        List<Asset> assets = assetRepository.findByPortfolioIdAndUserId(portfolio.getId(), userId);
-        if (assets.isEmpty()) {
-            return emptySnapshot(portfolio, baseCurrency);
+        List<Transaction> transactions =
+                transactionRepository.findAllForValuation(userId, portfolioIdOrNull, asOf);
+
+        if (transactions.isEmpty()) {
+            return ValuationResult.empty();
         }
 
-        // Une seule requête pour toutes les transactions du portefeuille
-        Map<UUID, List<Transaction>> txByAsset = transactionRepository
-                .findByPortfolioIdAndUserId(portfolio.getId(), userId)
-                .stream()
+        Set<String> symbols = transactions.stream()
+                .map(t -> t.getAsset().getSymbol())
+                .collect(Collectors.toSet());
+
+        Map<String, PriceSnapshot> prices = loadPrices(symbols, asOf);
+
+        // Regroupement en mémoire : plus aucune requête à partir d'ici
+        Map<UUID, List<Transaction>> byPortfolio = transactions.stream()
+                .collect(Collectors.groupingBy(t -> t.getAsset().getPortfolio().getId()));
+
+        CurrencyConverter.Session fxSession = currencyConverter.openSession();
+
+        List<PortfolioValuation> portfolios = byPortfolio.values().stream()
+                .map(txs -> valuatePortfolio(txs, prices, fxSession))
+                .toList();
+
+        return ValuationResult.aggregate(portfolios);
+    }
+
+    // --------------------------------------------------------- niveau portfolio
+
+    private PortfolioValuation valuatePortfolio(List<Transaction> portfolioTxs,
+                                                Map<String, PriceSnapshot> prices,
+                                                CurrencyConverter.Session fxSession) {
+
+        Portfolio portfolio = portfolioTxs.get(0).getAsset().getPortfolio();
+
+        Map<UUID, List<Transaction>> byAsset = portfolioTxs.stream()
                 .collect(Collectors.groupingBy(t -> t.getAsset().getId()));
 
-        // Une seule requête pour tous les derniers prix
-        Set<String> symbols = assets.stream().map(Asset::getSymbol).collect(Collectors.toSet());
-        Map<String, BigDecimal> latestPrices = loadLatestPrices(symbols);
+        List<PositionValuation> positions = byAsset.values().stream()
+                .map(txs -> valuatePosition(txs, prices, fxSession))
+                .filter(p -> p.getQuantity().signum() > 0
+                        || p.getRealizedGainEur().signum() != 0
+                        || p.getDividendsEur().signum() != 0)
+                .sorted(Comparator.comparing(PositionValuation::getSymbol))
+                .toList();
 
-        List<AssetPerformanceDTO> performances = new ArrayList<>();
-        BigDecimal totalValue = BigDecimal.ZERO;
-        BigDecimal totalInvested = BigDecimal.ZERO;
-        BigDecimal totalRealized = BigDecimal.ZERO;
+        BigDecimal currentValue = sum(positions, PositionValuation::getCurrentValueEur);
+        BigDecimal invested = sum(positions, PositionValuation::getInvestedEur);
+        BigDecimal unrealized = currentValue.subtract(invested);
+        BigDecimal realized = sum(positions, PositionValuation::getRealizedGainEur);
+        BigDecimal dividends = sum(positions, PositionValuation::getDividendsEur);
+        BigDecimal fees = sum(positions, PositionValuation::getTotalFeesEur);
 
-        for (Asset asset : assets) {
-            AssetPerformanceDTO perf = valuateAsset(
-                    asset,
-                    txByAsset.getOrDefault(asset.getId(), List.of()),
-                    latestPrices.get(asset.getSymbol()),
-                    baseCurrency
-            );
+        long openCount = positions.stream().filter(p -> p.getQuantity().signum() > 0).count();
 
-            // On n'affiche pas les positions totalement soldées
-            if (perf.getQuantity().signum() == 0 && perf.getRealizedGainLoss().signum() == 0) {
-                continue;
-            }
-
-            performances.add(perf);
-            totalValue = totalValue.add(perf.getCurrentValue());
-            totalInvested = totalInvested.add(perf.getInvestedAmount());
-            totalRealized = totalRealized.add(perf.getRealizedGainLoss());
-        }
-
-        BigDecimal unrealized = totalValue.subtract(totalInvested);
-        BigDecimal gainLoss = unrealized.add(totalRealized);
-
-        return PortfolioSnapshotDTO.builder()
+        return PortfolioValuation.builder()
                 .portfolioId(portfolio.getId())
-                .portfolioName(portfolio.getName())
-                .portfolioType(portfolio.getType())
-                .currentValue(scaleMoney(totalValue))
-                .investedAmount(scaleMoney(totalInvested))
-                .gainLoss(scaleMoney(gainLoss))
-                .gainLossPercentage(percentage(gainLoss, totalInvested))
-                .assetCount(performances.size())
-                .assets(performances)
-                .currency(baseCurrency)
+                .name(portfolio.getName())
+                .type(portfolio.getType())
+                .currentValueEur(currentValue)
+                .investedEur(invested)
+                .unrealizedGainEur(unrealized)
+                .unrealizedGainPercentage(percentage(unrealized, invested))
+                .realizedGainEur(realized)
+                .dividendsEur(dividends)
+                .totalFeesEur(fees)
+                .positions(positions)
+                .openPositionCount((int) openCount)
+                .hasIncompletePrices(positions.stream().anyMatch(PositionValuation::isPriceMissing))
                 .build();
     }
 
+    // ---------------------------------------------------------- niveau position
+
     /**
-     * Valorise une position avec la méthode du coût moyen pondéré (CUMP).
-     * Les ventes réduisent le coût de revient au prorata, et dégagent
-     * une plus/moins-value réalisée.
+     * Calcule le CUMP en rejouant les transactions dans l'ordre chronologique.
+     *
+     * Règles :
+     *  - BUY  : augmente la quantité et le coût total (frais inclus dans le coût,
+     *           car ils font partie du prix de revient réel de la position).
+     *  - SELL : réduit la quantité proportionnellement au coût moyen courant.
+     *           Le gain réalisé = produit net de la vente - coût sorti.
+     *  - DIVIDEND : n'affecte ni quantité ni coût, alimente uniquement
+     *               dividendsEur.
      */
-    private AssetPerformanceDTO valuateAsset(Asset asset,
-                                             List<Transaction> transactions,
-                                             BigDecimal rawPrice,
-                                             String baseCurrency) {
+    private PositionValuation valuatePosition(List<Transaction> assetTxs,
+                                              Map<String, PriceSnapshot> prices,
+                                              CurrencyConverter.Session fxSession) {
 
-        List<Transaction> ordered = transactions.stream()
-                .sorted(Comparator.comparing(
-                        Transaction::getTransactionDate,
-                        Comparator.nullsLast(Comparator.naturalOrder())))
-                .toList();
+        assetTxs.sort(Comparator.comparing(Transaction::getTransactionDate));
+        Asset asset = assetTxs.get(0).getAsset();
 
-        BigDecimal quantity = BigDecimal.ZERO;   // quantité détenue
-        BigDecimal costBasis = BigDecimal.ZERO;  // coût de revient en devise de base
-        BigDecimal realized = BigDecimal.ZERO;   // P/L réalisée
-        BigDecimal dividends = BigDecimal.ZERO;
+        BigDecimal quantity = BigDecimal.ZERO;
+        BigDecimal costBasisEur = BigDecimal.ZERO;   // coût total encore "en jeu"
+        BigDecimal realizedEur = BigDecimal.ZERO;
+        BigDecimal dividendsEur = BigDecimal.ZERO;
+        BigDecimal totalFeesEur = BigDecimal.ZERO;
 
-        for (Transaction tx : ordered) {
-            BigDecimal amountInBase = amountInBaseCurrency(tx);
+        for (Transaction tx : assetTxs) {
+            totalFeesEur = totalFeesEur.add(nz(tx.getFeesEur()));
 
             switch (tx.getType()) {
                 case BUY -> {
+                    BigDecimal txCost = nz(tx.getTotalAmountEur()).add(nz(tx.getFeesEur()));
                     quantity = quantity.add(tx.getQuantity());
-                    // Les frais font partie du prix de revient
-                    costBasis = costBasis.add(amountInBase);
+                    costBasisEur = costBasisEur.add(txCost);
                 }
                 case SELL -> {
-                    if (quantity.signum() <= 0) {
-                        log.warn("Vente sans position ouverte — asset={}, tx={}",
-                                asset.getSymbol(), tx.getId());
-                        continue;
-                    }
-                    BigDecimal sold = tx.getQuantity().min(quantity);
-                    // Part du coût de revient sortie du portefeuille
-                    BigDecimal costOut = costBasis
-                            .multiply(sold)
-                            .divide(quantity, MONEY_SCALE, RM);
+                    BigDecimal sellQty = tx.getQuantity().min(quantity);
+                    if (quantity.signum() > 0 && sellQty.signum() > 0) {
+                        BigDecimal avgCost = costBasisEur.divide(
+                                quantity, MoneyConstants.QUANTITY_SCALE, MoneyConstants.ROUNDING);
+                        BigDecimal costOut = avgCost.multiply(sellQty)
+                                .setScale(MoneyConstants.MONEY_SCALE, MoneyConstants.ROUNDING);
 
-                    realized = realized.add(amountInBase.subtract(costOut));
-                    costBasis = costBasis.subtract(costOut);
-                    quantity = quantity.subtract(sold);
+                        // Produit net de la vente = ce qui a été encaissé, frais déduits
+                        BigDecimal proceedsEur = nz(tx.getTotalAmountEur()).subtract(nz(tx.getFeesEur()));
+
+                        realizedEur = realizedEur.add(proceedsEur.subtract(costOut));
+                        costBasisEur = costBasisEur.subtract(costOut);
+                        quantity = quantity.subtract(sellQty);
+                    }
+                    // Si sellQty < tx.getQuantity() : vente à découvert non supportée,
+                    // on borne à la quantité détenue plutôt que de planter.
                 }
-                case DIVIDEND -> dividends = dividends.add(amountInBase);
+                case DIVIDEND -> dividendsEur = dividendsEur.add(nz(tx.getTotalAmountEur()));
             }
         }
 
-        realized = realized.add(dividends);
+        // Résidu d'arrondi : si la position est totalement soldée, le coût
+        // restant doit être nul, pas un epsilon négatif ou positif.
+        if (quantity.signum() == 0) {
+            costBasisEur = BigDecimal.ZERO;
+        }
 
-        BigDecimal priceInBase = convertPrice(rawPrice, asset, baseCurrency);
-        BigDecimal currentValue = quantity.multiply(priceInBase);
-        BigDecimal unrealized = currentValue.subtract(costBasis);
+        PriceSnapshot price = prices.getOrDefault(asset.getSymbol(), PriceSnapshot.missing(asset.getSymbol()));
 
-        BigDecimal avgCost = quantity.signum() > 0
-                ? costBasis.divide(quantity, QTY_SCALE, RM)
+        BigDecimal currentValueEur;
+        BigDecimal averageCostEur = quantity.signum() > 0
+                ? costBasisEur.divide(quantity, MoneyConstants.QUANTITY_SCALE, MoneyConstants.ROUNDING)
                 : BigDecimal.ZERO;
 
-        return AssetPerformanceDTO.builder()
+        if (price.missing() || quantity.signum() == 0) {
+            currentValueEur = BigDecimal.ZERO;
+        } else {
+            BigDecimal priceEur = fxSession.toEur(price.price(), price.currency());
+            currentValueEur = quantity.multiply(priceEur)
+                    .setScale(MoneyConstants.MONEY_SCALE, MoneyConstants.ROUNDING);
+        }
+
+        BigDecimal unrealizedEur = currentValueEur.subtract(costBasisEur);
+
+        return PositionValuation.builder()
                 .assetId(asset.getId())
                 .symbol(asset.getSymbol())
-                .name(asset.getLongName() != null ? asset.getLongName() : asset.getName())
+                .name(asset.getName())
                 .assetType(asset.getAssetType())
-                .currentPrice(priceInBase)
-                .quantity(quantity.stripTrailingZeros())
-                .currentValue(scaleMoney(currentValue))
-                .averageCostPerUnit(avgCost)
-                .investedAmount(scaleMoney(costBasis))
-                .gainLoss(scaleMoney(unrealized))
-                .gainLossPercentage(percentage(unrealized, costBasis))
-                .realizedGainLoss(scaleMoney(realized))
-                .priceAvailable(rawPrice != null)
-                .currency(baseCurrency)
+                .quantity(quantity)
+                .averageCostEur(averageCostEur)
+                .investedEur(costBasisEur)
+                .currentValueEur(currentValueEur)
+                .unrealizedGainEur(unrealizedEur)
+                .unrealizedGainPercentage(percentage(unrealizedEur, costBasisEur))
+                .realizedGainEur(realizedEur)
+                .dividendsEur(dividendsEur)
+                .totalFeesEur(totalFeesEur)
+                .lastPrice(price.price())
+                .priceCurrency(price.currency())
+                .priceAsOf(price.asOf())
+                .priceMissing(price.missing())
                 .build();
     }
 
-    /**
-     * Montant de la transaction dans la devise de référence.
-     * On privilégie le taux figé au moment de l'opération : une conversion
-     * au taux du jour ferait varier rétroactivement le montant investi.
-     */
-    private BigDecimal amountInBaseCurrency(Transaction tx) {
-        BigDecimal gross = tx.getTotalAmount() != null ? tx.getTotalAmount() : BigDecimal.ZERO;
-        BigDecimal fees = tx.getFees() != null ? tx.getFees() : BigDecimal.ZERO;
+    // -------------------------------------------------------------- prix (bulk)
 
-        // Les frais alourdissent un achat et réduisent le produit d'une vente
-        BigDecimal net = tx.getType() == TransactionType.SELL
-                ? gross.subtract(fees)
-                : gross.add(fees);
+    private Map<String, PriceSnapshot> loadPrices(Set<String> symbols, LocalDateTime asOf) {
+        List<LatestPriceProjection> rows = (asOf == null)
+                ? assetPriceRepository.findLatestForSymbols(symbols)
+                : assetPriceRepository.findLatestForSymbolsAsOf(symbols, asOf);
 
-        BigDecimal rate = tx.getExchangeRate() != null && tx.getExchangeRate().signum() > 0
-                ? tx.getExchangeRate()
-                : BigDecimal.ONE;
-
-        return net.multiply(rate);
-    }
-
-    private BigDecimal convertPrice(BigDecimal rawPrice, Asset asset, String baseCurrency) {
-        if (rawPrice == null) {
-            return BigDecimal.ZERO;
+        Map<String, PriceSnapshot> result = new HashMap<>();
+        for (LatestPriceProjection row : rows) {
+            result.put(row.getSymbol(), new PriceSnapshot(
+                    row.getSymbol(), row.getPrice(), row.getCurrency(), row.getLastUpdated(), false));
         }
-        String from = asset.getCurrency();
-        if (from == null || from.equalsIgnoreCase(baseCurrency)) {
-            return rawPrice;
+
+        Set<String> missing = new HashSet<>(symbols);
+        missing.removeAll(result.keySet());
+        if (!missing.isEmpty()) {
+            log.warn("Prix manquant pour les symboles : {}", missing);
+            missing.forEach(s -> result.put(s, PriceSnapshot.missing(s)));
         }
-        try {
-            return rawPrice.multiply(exchangeRateService.getRate(from, baseCurrency));
-        } catch (Exception e) {
-            log.error("Conversion {}->{} impossible pour {} : {}",
-                    from, baseCurrency, asset.getSymbol(), e.getMessage());
-            return BigDecimal.ZERO;
-        }
+
+        return result;
     }
 
-    /** Charge le dernier prix connu de chaque symbole. Un prix manquant vaut null, pas une exception. */
-    private Map<String, BigDecimal> loadLatestPrices(Set<String> symbols) {
-        Map<String, BigDecimal> prices = new HashMap<>();
-        for (String symbol : symbols) {
-            assetPriceRepository.findLatestBySymbol(symbol)
-                    .map(AssetPrice::getPrice)
-                    .ifPresentOrElse(
-                            p -> prices.put(symbol, p),
-                            () -> log.warn("Aucun prix disponible pour le symbole {}", symbol)
-                    );
-        }
-        return prices;
+    // ------------------------------------------------------------------- utils
+
+    private BigDecimal nz(BigDecimal v) {
+        return v != null ? v : BigDecimal.ZERO;
     }
 
-    private PortfolioSnapshotDTO emptySnapshot(Portfolio portfolio, String baseCurrency) {
-        return PortfolioSnapshotDTO.builder()
-                .portfolioId(portfolio.getId())
-                .portfolioName(portfolio.getName())
-                .portfolioType(portfolio.getType())
-                .currentValue(BigDecimal.ZERO)
-                .investedAmount(BigDecimal.ZERO)
-                .gainLoss(BigDecimal.ZERO)
-                .gainLossPercentage(BigDecimal.ZERO)
-                .assetCount(0)
-                .assets(List.of())
-                .currency(baseCurrency)
-                .build();
+    private BigDecimal sum(List<PositionValuation> list, Function<PositionValuation, BigDecimal> getter) {
+        return list.stream()
+                .map(getter)
+                .filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .setScale(MoneyConstants.MONEY_SCALE, MoneyConstants.ROUNDING);
     }
 
-    static BigDecimal scaleMoney(BigDecimal v) {
-        return v == null ? BigDecimal.ZERO : v.setScale(MONEY_SCALE, RM);
-    }
-
-    static BigDecimal percentage(BigDecimal gain, BigDecimal base) {
+    private BigDecimal percentage(BigDecimal gain, BigDecimal base) {
         if (base == null || base.signum() == 0) {
             return BigDecimal.ZERO;
         }
         return gain.multiply(BigDecimal.valueOf(100))
-                .divide(base, PCT_SCALE, RM);
+                .divide(base, MoneyConstants.PERCENT_SCALE, MoneyConstants.ROUNDING);
     }
 }

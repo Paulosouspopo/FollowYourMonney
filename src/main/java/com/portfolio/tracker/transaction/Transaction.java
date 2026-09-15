@@ -1,21 +1,35 @@
 package com.portfolio.tracker.transaction;
 
+import com.portfolio.tracker.asset.Asset;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
-import com.portfolio.tracker.asset.Asset;
-
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
+/**
+ * Opération sur un actif.
+ *
+ * Modèle monétaire :
+ *  - {@code totalAmount} / {@code fees} / {@code pricePerUnit} sont dans la
+ *    devise d'origine de l'opération ({@code currency}) : ce que l'utilisateur
+ *    a réellement saisi, jamais recalculé.
+ *  - {@code totalAmountEur} / {@code feesEur} sont figés en EUR au taux du jour
+ *    de l'opération ({@code exchangeRateToEur}) : c'est la vérité historique
+ *    qui sert à tous les calculs de performance.
+ */
 @Entity
 @Table(name = "transactions", indexes = {
         @Index(name = "idx_transactions_asset_date", columnList = "asset_id, transactionDate")
 })
-@Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
 public class Transaction {
 
     @Id
@@ -27,14 +41,14 @@ public class Transaction {
     private Asset asset;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
+    @Column(nullable = false, length = 20)
     private TransactionType type;
 
     /** Pour DIVIDEND : quantité de titres ayant généré le dividende (ou 0). */
     @Column(nullable = false, precision = 19, scale = 8)
     private BigDecimal quantity;
 
-    /** Devise d'origine de l'opération. */
+    /** Prix unitaire dans la devise d'origine. */
     @Column(nullable = false, precision = 19, scale = 8)
     private BigDecimal pricePerUnit;
 
@@ -47,22 +61,23 @@ public class Transaction {
     @Column(nullable = false, precision = 19, scale = 2)
     private BigDecimal totalAmount;
 
-    /** Devise de l'opération. Ex: "USD" */
+    /** Devise d'origine de l'opération (ISO 4217). */
     @Column(nullable = false, length = 3)
     private String currency;
 
-    /** Taux vers la devise de référence de l'user au moment de l'opération. 1 si identique. */
-    @Column(nullable = false, precision = 19, scale = 8)
+    /** Taux currency -> EUR figé au moment de l'opération. 1 si currency = EUR. */
+    @Column(name = "exchange_rate_to_eur", nullable = false, precision = 19, scale = 8)
     @Builder.Default
-    private BigDecimal exchangeRate = BigDecimal.ONE;
+    private BigDecimal exchangeRateToEur = BigDecimal.ONE;
 
-    /** Devise de référence cible (celle de l'user à la saisie). Ex: "EUR" */
-    @Column(nullable = false, length = 3)
-    private String baseCurrency;
+    /** totalAmount converti en EUR au taux d'époque. Hors frais. */
+    @Column(name = "total_amount_eur", nullable = false, precision = 19, scale = 2)
+    private BigDecimal totalAmountEur;
 
-    /** (totalAmount + fees) * exchangeRate — figé, jamais recalculé. */
-    @Column(nullable = false, precision = 19, scale = 2)
-    private BigDecimal totalAmountInBaseCurrency;
+    /** fees converti en EUR au taux d'époque. */
+    @Column(name = "fees_eur", nullable = false, precision = 19, scale = 2)
+    @Builder.Default
+    private BigDecimal feesEur = BigDecimal.ZERO;
 
     @Column(nullable = false)
     private LocalDateTime transactionDate;
