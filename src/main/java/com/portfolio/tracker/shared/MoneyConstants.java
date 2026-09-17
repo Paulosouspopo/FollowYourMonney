@@ -24,7 +24,7 @@ public final class MoneyConstants {
     public static final int RATE_SCALE = 8;
 
     /** Échelle des pourcentages. */
-    public static final int PERCENT_SCALE = 4;
+    public static final int PERCENT_SCALE = 2;
 
     public static final RoundingMode ROUNDING = RoundingMode.HALF_UP;
 

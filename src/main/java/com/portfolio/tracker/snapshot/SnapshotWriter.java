@@ -37,7 +37,6 @@ public class SnapshotWriter {
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void writeAsOf(Portfolio portfolio, LocalDate date, LocalDateTime asOf) {
-        UUID_CHECK:
         {
             if (portfolio.getUser() == null) {
                 log.error("Portefeuille {} sans utilisateur, snapshot ignoré", portfolio.getId());

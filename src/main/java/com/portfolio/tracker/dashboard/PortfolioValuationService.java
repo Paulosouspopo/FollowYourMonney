@@ -24,16 +24,16 @@ import java.util.stream.Collectors;
  * Moteur de valorisation. Toute la performance de l'application repose ici.
  *
  * Principes :
- *  1. Une seule requête pour toutes les transactions concernées (JOIN FETCH),
- *     une seule requête pour tous les derniers prix (DISTINCT ON). Aucun N+1.
- *  2. Le coût d'une position est calculé au CUMP (coût unitaire moyen pondéré),
- *     recalculé transaction par transaction, dans l'ordre chronologique.
- *  3. L'investi (investedEur) reflète le taux de change du JOUR DE L'ACHAT
- *     (figé sur la transaction). La valeur courante (currentValueEur) utilise
- *     le taux du jour. C'est volontaire : le montant que j'ai sorti de ma poche
- *     ne bouge pas rétroactivement parce que l'euro a fluctué depuis.
- *  4. Un prix manquant ne fait pas planter la valorisation : la position est
- *     valorisée à 0 et signalée via {@code priceMissing}.
+ * 1. Une seule requête pour toutes les transactions concernées (JOIN FETCH),
+ * une seule requête pour tous les derniers prix (DISTINCT ON). Aucun N+1.
+ * 2. Le coût d'une position est calculé au CUMP (coût unitaire moyen pondéré),
+ * recalculé transaction par transaction, dans l'ordre chronologique.
+ * 3. L'investi (investedEur) reflète le taux de change du JOUR DE L'ACHAT
+ * (figé sur la transaction). La valeur courante (currentValueEur) utilise
+ * le taux du jour. C'est volontaire : le montant que j'ai sorti de ma poche
+ * ne bouge pas rétroactivement parce que l'euro a fluctué depuis.
+ * 4. Un prix manquant ne fait pas planter la valorisation : la position est
+ * valorisée à 0 et signalée via {@code priceMissing}.
  */
 @Service
 @RequiredArgsConstructor
@@ -53,8 +53,7 @@ public class PortfolioValuationService {
      */
     public ValuationResult valuate(UUID userId, UUID portfolioIdOrNull, LocalDateTime asOf) {
 
-        List<Transaction> transactions =
-                transactionRepository.findAllForValuation(userId, portfolioIdOrNull, asOf);
+        List<Transaction> transactions = transactionRepository.findAllForValuation(userId, portfolioIdOrNull, asOf);
 
         if (transactions.isEmpty()) {
             return ValuationResult.empty();
@@ -82,8 +81,8 @@ public class PortfolioValuationService {
     // --------------------------------------------------------- niveau portfolio
 
     private PortfolioValuation valuatePortfolio(List<Transaction> portfolioTxs,
-                                                Map<String, PriceSnapshot> prices,
-                                                CurrencyConverter.Session fxSession) {
+            Map<String, PriceSnapshot> prices,
+            CurrencyConverter.Session fxSession) {
 
         Portfolio portfolio = portfolioTxs.get(0).getAsset().getPortfolio();
 
@@ -130,22 +129,22 @@ public class PortfolioValuationService {
      * Calcule le CUMP en rejouant les transactions dans l'ordre chronologique.
      *
      * Règles :
-     *  - BUY  : augmente la quantité et le coût total (frais inclus dans le coût,
-     *           car ils font partie du prix de revient réel de la position).
-     *  - SELL : réduit la quantité proportionnellement au coût moyen courant.
-     *           Le gain réalisé = produit net de la vente - coût sorti.
-     *  - DIVIDEND : n'affecte ni quantité ni coût, alimente uniquement
-     *               dividendsEur.
+     * - BUY : augmente la quantité et le coût total (frais inclus dans le coût,
+     * car ils font partie du prix de revient réel de la position).
+     * - SELL : réduit la quantité proportionnellement au coût moyen courant.
+     * Le gain réalisé = produit net de la vente - coût sorti.
+     * - DIVIDEND : n'affecte ni quantité ni coût, alimente uniquement
+     * dividendsEur.
      */
     private PositionValuation valuatePosition(List<Transaction> assetTxs,
-                                              Map<String, PriceSnapshot> prices,
-                                              CurrencyConverter.Session fxSession) {
+            Map<String, PriceSnapshot> prices,
+            CurrencyConverter.Session fxSession) {
 
         assetTxs.sort(Comparator.comparing(Transaction::getTransactionDate));
         Asset asset = assetTxs.get(0).getAsset();
 
         BigDecimal quantity = BigDecimal.ZERO;
-        BigDecimal costBasisEur = BigDecimal.ZERO;   // coût total encore "en jeu"
+        BigDecimal costBasisEur = BigDecimal.ZERO; // coût total encore "en jeu"
         BigDecimal realizedEur = BigDecimal.ZERO;
         BigDecimal dividendsEur = BigDecimal.ZERO;
         BigDecimal totalFeesEur = BigDecimal.ZERO;
@@ -194,7 +193,12 @@ public class PortfolioValuationService {
                 ? costBasisEur.divide(quantity, MoneyConstants.QUANTITY_SCALE, MoneyConstants.ROUNDING)
                 : BigDecimal.ZERO;
 
-        if (price.missing() || quantity.signum() == 0) {
+        // - Si quantity == 0 : position soldée, pas besoin de prix, donc priceMissing =
+        // false
+        // - Si quantity > 0 et prix absent : priceMissing = true
+        boolean priceMissing = quantity.signum() > 0 && price.missing();
+
+        if (priceMissing || quantity.signum() == 0) {
             currentValueEur = BigDecimal.ZERO;
         } else {
             BigDecimal priceEur = fxSession.toEur(price.price(), price.currency());
@@ -221,16 +225,17 @@ public class PortfolioValuationService {
                 .lastPrice(price.price())
                 .priceCurrency(price.currency())
                 .priceAsOf(price.asOf())
-                .priceMissing(price.missing())
+                .priceMissing(priceMissing)
                 .build();
     }
 
     // -------------------------------------------------------------- prix (bulk)
 
     private Map<String, PriceSnapshot> loadPrices(Set<String> symbols, LocalDateTime asOf) {
+        List<String> symbolsList = new ArrayList<>(symbols); // Convertis en List
         List<LatestPriceProjection> rows = (asOf == null)
-                ? assetPriceRepository.findLatestForSymbols(symbols)
-                : assetPriceRepository.findLatestForSymbolsAsOf(symbols, asOf);
+                ? assetPriceRepository.findLatestForSymbols(symbolsList)
+                : assetPriceRepository.findLatestForSymbolsAsOf(symbolsList, asOf);
 
         Map<String, PriceSnapshot> result = new HashMap<>();
         for (LatestPriceProjection row : rows) {
