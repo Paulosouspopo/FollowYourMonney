@@ -2,8 +2,11 @@ package com.portfolio.tracker.snapshot;
 
 import com.portfolio.tracker.dashboard.PortfolioValuationService;
 import com.portfolio.tracker.dashboard.dto.PortfolioValuation;
+import com.portfolio.tracker.dashboard.dto.PositionValuation;
 import com.portfolio.tracker.dashboard.dto.ValuationResult;
 import com.portfolio.tracker.portfolio.Portfolio;
+import com.portfolio.tracker.shared.MoneyConstants;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -37,11 +40,10 @@ public class SnapshotWriter {
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void writeAsOf(Portfolio portfolio, LocalDate date, LocalDateTime asOf) {
-        {
-            if (portfolio.getUser() == null) {
-                log.error("Portefeuille {} sans utilisateur, snapshot ignoré", portfolio.getId());
-                return;
-            }
+
+        if (portfolio.getUser() == null) {
+            log.error("Portefeuille {} sans utilisateur, snapshot ignoré", portfolio.getId());
+            return;
         }
 
         ValuationResult result = valuationService.valuate(
@@ -54,6 +56,19 @@ public class SnapshotWriter {
 
         PortfolioValuation v = result.getPortfolios().get(0);
 
+        // Position détenue mais aucun prix connu à cette date : on n'écrit pas.
+        // Un snapshot à 0 créerait un faux décrochage sur la courbe.
+        boolean positionDetenue = v.getPositions().stream()
+                .anyMatch(p -> p.getQuantity().signum() > 0);
+        boolean tousPrixManquants = v.getPositions().stream()
+                .filter(p -> p.getQuantity().signum() > 0)
+                .allMatch(PositionValuation::isPriceMissing);
+
+        if (positionDetenue && tousPrixManquants) {
+            log.debug("Tous les prix manquants pour {} au {}, snapshot ignoré", portfolio.getId(), date);
+            return;
+        }
+
         PortfolioSnapshot snapshot = snapshotRepository
                 .findByPortfolioIdAndSnapshotDate(portfolio.getId(), date)
                 .orElseGet(() -> PortfolioSnapshot.builder()
@@ -65,6 +80,7 @@ public class SnapshotWriter {
         snapshot.setTotalInvested(v.getInvestedEur());
         snapshot.setGainLoss(v.getUnrealizedGainEur());
         snapshot.setGainLossPercentage(v.getUnrealizedGainPercentage());
+        snapshot.setBaseCurrency(MoneyConstants.BASE_CURRENCY);
 
         snapshotRepository.save(snapshot);
     }
