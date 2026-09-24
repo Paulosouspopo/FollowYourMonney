@@ -32,6 +32,11 @@ public class JwtService {
                 .compact();
     }
 
+    /** Durée de vie du jeton d'accès, communiquée au front. */
+    public long getExpirationSeconds() {
+        return jwtExpiration / 1000;
+    }
+
     public String extractEmail(String token) {
         return extractClaim(token, Claims::getSubject);
     }

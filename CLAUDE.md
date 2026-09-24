@@ -98,9 +98,33 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
   (`priceMissing = true`), dashboard comme courbe.
 
 ## Sécurité
-- Rôle ADMIN = emails listés dans `app.admin.emails` (pas de rôle en base).
-  Requis pour `/api/admin/**`, `POST /api/asset-prices/**` et les
-  `@PreAuthorize` (`@EnableMethodSecurity` actif).
+- **Session** : JWT d'accès court (15 min, en-tête `Authorization`) + jeton
+  de renouvellement opaque (30 j) dans le cookie `fym_refresh` (HttpOnly,
+  SameSite=Strict, Path=/api/auth, Secure en prod via
+  `app.auth.cookie-secure`). En base : empreinte SHA-256 seulement
+  (`refresh_tokens`, `SecureTokens`).
+- **Rotation** à chaque `/api/auth/refresh` ; un jeton déjà remplacé depuis
+  plus de `AuthService.ROTATION_GRACE` (onglets simultanés) = vol présumé →
+  toutes les sessions de l'utilisateur révoquées.
+- **Comptes** : inscription `POST /api/auth/register` (plus de `POST
+  /api/users` public), email à vérifier avant connexion (403 + code
+  `EMAIL_NOT_VERIFIED`), mot de passe oublié / réinitialisation (liens à usage
+  unique, `account_tokens`), changement de mot de passe et réinitialisation
+  = toutes les sessions révoquées. Réponses identiques pour un email inconnu
+  (pas d'énumération des comptes).
+- **Emails** : `EmailSender` → SMTP si `app.mail.enabled=true` (Mailpit en
+  dev : `docker compose up -d`, http://localhost:8025), sinon écrits dans les
+  logs (le lien de vérification s'y trouve).
+- **Limitation de débit** en mémoire (`RateLimiter`, 429 + Retry-After) sur
+  les endpoints publics sensibles ; désactivée dans le profil test.
+- Non authentifié → **401 JSON** (`JsonSecurityErrorHandler`) : le front s'en
+  sert pour renouveler la session. Rôle insuffisant → 403.
+- **Rôles en base** (`users.role`) ; `app.admin.emails` promeut ADMIN au
+  démarrage (`AdminBootstrap`). ADMIN requis pour `/api/admin/**`,
+  `POST /api/asset-prices/**` et les `@PreAuthorize`.
+- Derrière un reverse proxy en prod : configurer
+  `server.forward-headers-strategy` pour que la limitation par IP voie la
+  vraie adresse du client.
 
 ## Points sensibles / dette technique restante
 - En local, DEUX PostgreSQL écoutent sur 5432 : le service Windows natif

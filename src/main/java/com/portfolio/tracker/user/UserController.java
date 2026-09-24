@@ -1,12 +1,10 @@
 package com.portfolio.tracker.user;
 
-import com.portfolio.tracker.user.dto.UserCreateRequest;
 import com.portfolio.tracker.user.dto.UserResponse;
 import com.portfolio.tracker.user.dto.UserUpdateRequest;
 import com.portfolio.tracker.security.CustomUserDetails;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -21,12 +19,7 @@ public class UserController {
 
     private final UserService userService;
 
-    // ✅ PUBLIC - Création sans authentification
-    @PostMapping
-    public ResponseEntity<UserResponse> create(@Valid @RequestBody UserCreateRequest request) {
-        UserResponse created = userService.create(request);
-        return ResponseEntity.status(HttpStatus.CREATED).body(created);
-    }
+    // Création de compte : POST /api/auth/register (AuthController)
 
     // ✅ AUTHENTIFIÉ - Récupère son propre profil
     @GetMapping("/me")
