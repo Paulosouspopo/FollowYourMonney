@@ -13,7 +13,13 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
 ## Stack
 - Java 21, Spring Boot 3.x
 - PostgreSQL 16 (via Docker, `compose.yml`)
-- JPA/Hibernate — pas de Flyway pour l'instant (env dev, `ddl-auto` update)
+- JPA/Hibernate en `ddl-auto=validate` : le schéma est géré par **Flyway**
+  (`src/main/resources/db/migration`). Toute modification d'entité = une
+  nouvelle migration `V<n>__description.sql` (ne JAMAIS modifier une
+  migration déjà appliquée). Les tests d'intégration appliquent les
+  migrations puis Hibernate valide : un oubli fait échouer le build.
+- Base existante sans historique Flyway → baselinée en V1.
+- CI : GitHub Actions (`.github/workflows/ci.yml`, `./mvnw verify`).
 - Lombok
 - Tests : JUnit 5 + Mockito
 
@@ -97,7 +103,9 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
   `@PreAuthorize` (`@EnableMethodSecurity` actif).
 
 ## Points sensibles / dette technique restante
-- Flyway activé sans migrations alors que `ddl-auto=update` (à trancher).
+- En local, DEUX PostgreSQL écoutent sur 5432 : le service Windows natif
+  (`postgresql-x64-16`, qui contient les données de dev) et le conteneur
+  `compose.yaml` (vide). À unifier.
 - Le job horaire recalcule le point du jour de TOUS les portefeuilles
   (OK à petite échelle ; à cibler sur les portefeuilles détenant les
   symboles mis à jour si le volume grossit).

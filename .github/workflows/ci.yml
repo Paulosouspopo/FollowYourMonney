@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build & tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      # Les tests d'intégration démarrent PostgreSQL via Testcontainers
+      # (Docker est disponible sur les runners ubuntu) et appliquent les
+      # migrations Flyway : un écart entité/migration fait échouer le build.
+      - name: Build et tests
+        run: ./mvnw -B verify
+
+      - name: Rapports de tests
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: target/surefire-reports/

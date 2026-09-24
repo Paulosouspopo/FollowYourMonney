@@ -31,8 +31,9 @@ public abstract class AbstractIntegrationTest {
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
-        registry.add("spring.jpa.hibernate.ddl-auto", () -> "create-drop");
-        registry.add("spring.flyway.enabled", () -> "false");
+        // Schéma créé par les migrations Flyway, puis validé par Hibernate
+        registry.add("spring.jpa.hibernate.ddl-auto", () -> "validate");
+        registry.add("spring.flyway.enabled", () -> "true");
         registry.add("app.scheduling.enabled", () -> "false");
         registry.add("app.jwt.secret", () -> "test-secret-for-integration-tests-only-not-for-prod-32chars-minimum");
     }
