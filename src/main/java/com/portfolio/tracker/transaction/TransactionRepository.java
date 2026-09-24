@@ -16,12 +16,26 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
         Optional<Transaction> findByIdAndUserId(@Param("transactionId") UUID transactionId,
                         @Param("userId") UUID userId);
 
+        /** Transactions d'un actif d'UN portefeuille (le même symbole peut exister ailleurs). */
         @Query("""
                         SELECT t FROM Transaction t
-                        WHERE t.asset.symbol = :symbol AND t.asset.portfolio.user.id = :userId
-                        ORDER BY t.transactionDate DESC
+                        JOIN FETCH t.asset a
+                        WHERE a.symbol = :symbol AND a.portfolio.id = :portfolioId
+                        AND a.portfolio.user.id = :userId
+                        ORDER BY t.transactionDate DESC, t.createdAt DESC
                         """)
-        List<Transaction> findByAssetSymbolAndUserId(@Param("symbol") String symbol,
+        List<Transaction> findByAssetSymbolAndPortfolioIdAndUserId(@Param("symbol") String symbol,
+                        @Param("portfolioId") UUID portfolioId,
+                        @Param("userId") UUID userId);
+
+        /** Toutes les transactions d'un portefeuille, plus récentes d'abord. */
+        @Query("""
+                        SELECT t FROM Transaction t
+                        JOIN FETCH t.asset a
+                        WHERE a.portfolio.id = :portfolioId AND a.portfolio.user.id = :userId
+                        ORDER BY t.transactionDate DESC, t.createdAt DESC
+                        """)
+        List<Transaction> findByPortfolioIdAndUserId(@Param("portfolioId") UUID portfolioId,
                         @Param("userId") UUID userId);
 
         @Query("SELECT t FROM Transaction t WHERE t.asset.id = :assetId AND t.asset.portfolio.user.id = :userId")
@@ -44,7 +58,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
                         WHERE p.user_id = :userId
                         AND (CAST(:portfolioId AS uuid) IS NULL OR p.id = CAST(:portfolioId AS uuid))
                         AND (CAST(:asOf AS timestamp) IS NULL OR t.transaction_date <= CAST(:asOf AS timestamp))
-                        ORDER BY t.transaction_date ASC
+                        ORDER BY t.transaction_date ASC, t.created_at ASC
                         """, nativeQuery = true)
         List<Transaction> findAllForValuation(@Param("userId") UUID userId,
                         @Param("portfolioId") UUID portfolioId,

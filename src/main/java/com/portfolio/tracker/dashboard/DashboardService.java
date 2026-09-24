@@ -4,7 +4,6 @@ import com.portfolio.tracker.dashboard.dto.*;
 import com.portfolio.tracker.snapshot.PortfolioSnapshot;
 import com.portfolio.tracker.snapshot.PortfolioSnapshotRepository;
 import com.portfolio.tracker.shared.MoneyConstants;
-import com.portfolio.tracker.shared.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,10 +40,9 @@ public class DashboardService {
     public DashboardResponse getPortfolioDashboard(UUID userId, UUID portfolioId, String periodCode) {
         DashboardPeriod period = DashboardPeriod.fromCode(periodCode);
 
+        // Lève ResourceNotFoundException si le portefeuille n'appartient pas à
+        // l'utilisateur ; un portefeuille vide renvoie une valorisation neutre.
         ValuationResult valuation = valuationService.valuate(userId, portfolioId, null);
-        if (valuation.getPortfolios().isEmpty()) {
-            throw new ResourceNotFoundException("Portefeuille introuvable ou vide", portfolioId);
-        }
 
         List<CurvePointDTO> curve = buildCurveForPortfolio(portfolioId, period);
 

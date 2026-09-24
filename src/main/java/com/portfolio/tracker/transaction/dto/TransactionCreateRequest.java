@@ -2,7 +2,6 @@ package com.portfolio.tracker.transaction.dto;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.util.UUID;
 
 import com.portfolio.tracker.transaction.TransactionType;
 import jakarta.validation.constraints.DecimalMin;
@@ -14,9 +13,6 @@ import jakarta.validation.constraints.Size;
 
 public record TransactionCreateRequest(
 
-        @NotNull(message = "L'id du portefeuille est obligatoire")
-        UUID portfolioId,
-
         @NotBlank(message = "Le symbole est obligatoire")
         @Size(max = 20, message = "Le symbole ne doit pas dépasser 20 caractères")
         String symbol,
@@ -25,11 +21,11 @@ public record TransactionCreateRequest(
         TransactionType type,
 
         @NotNull(message = "La quantité est obligatoire")
-        @DecimalMin(value = "0.0", inclusive = true, message = "La quantité doit être positive ou nulle")
+        @DecimalMin(value = "0.0", inclusive = false, message = "La quantité doit être strictement positive")
         BigDecimal quantity,
 
         @NotNull(message = "Le prix par unité est obligatoire")
-        @DecimalMin(value = "0.0", inclusive = true, message = "Le prix par unité doit être positif ou nul")
+        @DecimalMin(value = "0.0", inclusive = false, message = "Le prix doit être strictement positif")
         BigDecimal pricePerUnit,
 
         @DecimalMin(value = "0.0", message = "Les frais doivent être positifs ou nuls")

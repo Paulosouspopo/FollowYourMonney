@@ -23,15 +23,16 @@ public class TransactionController {
     private final TransactionService transactionService;
 
     /**
-     * Récupère les transactions d'un asset
+     * Transactions du portefeuille (plus récentes d'abord), éventuellement
+     * filtrées sur un actif.
      */
     @GetMapping
-    public ResponseEntity<List<TransactionResponse>> getByAsset(
+    public ResponseEntity<List<TransactionResponse>> getByPortfolio(
             @PathVariable UUID portfolioId,
-            @RequestParam String assetSymbol,
+            @RequestParam(required = false) String assetSymbol,
             @AuthenticationPrincipal CustomUserDetails userDetails) {
         return ResponseEntity.ok(
-                transactionService.findByAssetSymbolAndPortfolioId(assetSymbol, portfolioId, userDetails.getId()));
+                transactionService.findByPortfolio(portfolioId, assetSymbol, userDetails.getId()));
     }
 
     /**

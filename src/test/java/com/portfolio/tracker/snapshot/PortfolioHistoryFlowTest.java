@@ -32,6 +32,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -127,7 +128,7 @@ class PortfolioHistoryFlowTest extends AbstractIntegrationTest {
     @DisplayName("Deuxième transaction sur un symbole déjà connu : snapshots recalculés sans re-télécharger")
     void deuxiemeTransactionMemeSymbole() {
         transactionService.create(portfolioId, buy("10", "100", 10), userId);
-        transactionService.create(portfolioId, new TransactionCreateRequest(portfolioId, AAPL,
+        transactionService.create(portfolioId, new TransactionCreateRequest(AAPL,
                 TransactionType.SELL, new BigDecimal("5"), new BigDecimal("160"), null, "USD",
                 today.minusDays(3).atTime(12, 0), null), userId);
 
@@ -179,10 +180,65 @@ class PortfolioHistoryFlowTest extends AbstractIntegrationTest {
                 .hasSize(11);
     }
 
+    @Test
+    @DisplayName("Vente supérieure à la quantité détenue à sa date : refusée, y compris via une suppression d'achat")
+    void venteADecouvertRefusee() {
+        TransactionResponse buy = transactionService.create(portfolioId, buy("10", "100", 10), userId);
+
+        assertThatThrownBy(() -> transactionService.create(portfolioId, sell("11", 3), userId))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("seulement 10");
+
+        transactionService.create(portfolioId, sell("4", 3), userId);
+        assertThatThrownBy(() -> transactionService.deleteById(buy.id(), userId))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("Dividende à montant nul : refusé (totalAmount = quantité × prix)")
+    void dividendeNulRefuse() {
+        transactionService.create(portfolioId, buy("10", "100", 10), userId);
+
+        assertThatThrownBy(() -> transactionService.create(portfolioId, new TransactionCreateRequest(AAPL,
+                TransactionType.DIVIDEND, BigDecimal.ZERO, new BigDecimal("12"), null, "USD",
+                today.minusDays(2).atTime(12, 0), null), userId))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("Devise absente : devise de cotation de l'actif, pas EUR")
+    void deviseParDefautDeLActif() {
+        TransactionResponse buy = transactionService.create(portfolioId, new TransactionCreateRequest(AAPL,
+                TransactionType.BUY, new BigDecimal("1"), new BigDecimal("100"), null, null,
+                today.minusDays(2).atTime(12, 0), null), userId);
+
+        assertThat(buy.currency()).isEqualTo("USD");
+    }
+
+    @Test
+    @DisplayName("Transactions d'un symbole : limitées au portefeuille demandé")
+    void transactionsLimiteesAuPortefeuille() {
+        UUID otherId = portfolioRepository.save(Portfolio.builder().name("PEA").type(PortfolioType.PEA)
+                .user(userRepository.findById(userId).orElseThrow()).build()).getId();
+        transactionService.create(portfolioId, buy("10", "100", 10), userId);
+        transactionService.create(otherId, buy("3", "100", 5), userId);
+
+        assertThat(transactionService.findByPortfolio(portfolioId, AAPL, userId))
+                .singleElement()
+                .satisfies(t -> assertThat(t.portfolioId()).isEqualTo(portfolioId));
+        assertThat(transactionService.findByPortfolio(otherId, null, userId)).hasSize(1);
+    }
+
     // ------------------------------------------------------------------ utils
 
+    private TransactionCreateRequest sell(String qty, int daysAgo) {
+        return new TransactionCreateRequest(AAPL, TransactionType.SELL,
+                new BigDecimal(qty), new BigDecimal("160"), null, "USD",
+                today.minusDays(daysAgo).atTime(12, 0), null);
+    }
+
     private TransactionCreateRequest buy(String qty, String price, int daysAgo) {
-        return new TransactionCreateRequest(portfolioId, AAPL, TransactionType.BUY,
+        return new TransactionCreateRequest(AAPL, TransactionType.BUY,
                 new BigDecimal(qty), new BigDecimal(price), null, "USD",
                 today.minusDays(daysAgo).atTime(12, 0), null);
     }

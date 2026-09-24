@@ -2,3 +2,5 @@
 # application-local.properties est gitignore et ne doit JAMAIS etre commite.
 
 app.jwt.secret=CHANGE_ME_min_32_caracteres
+# Emails administrateurs (backfill, refresh manuel des cours)
+app.admin.emails=moi@example.com

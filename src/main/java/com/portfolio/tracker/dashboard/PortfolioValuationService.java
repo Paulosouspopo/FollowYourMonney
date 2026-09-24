@@ -34,8 +34,9 @@ import java.util.stream.Collectors;
  * (figé sur la transaction). La valeur courante (currentValueEur) utilise
  * le taux du jour. C'est volontaire : le montant que j'ai sorti de ma poche
  * ne bouge pas rétroactivement parce que l'euro a fluctué depuis.
- * 4. Un prix manquant ne fait pas planter la valorisation : la position est
- * valorisée à 0 et signalée via {@code priceMissing}.
+ * 4. Aucun cours de marché : la position est valorisée au prix de sa
+ * dernière transaction (même règle que la courbe historique, jamais 0) et
+ * signalée via {@code priceMissing}.
  */
 @Service
 @RequiredArgsConstructor
@@ -167,7 +168,7 @@ public class PortfolioValuationService {
             Map<String, PriceSnapshot> prices,
             CurrencyConverter.Session fxSession) {
 
-        assetTxs.sort(Comparator.comparing(Transaction::getTransactionDate));
+        assetTxs.sort(Transaction.CHRONOLOGICAL);
         Asset asset = assetTxs.get(0).getAsset();
 
         PositionState state = new PositionState();
@@ -178,18 +179,18 @@ public class PortfolioValuationService {
 
         PriceSnapshot price = prices.getOrDefault(asset.getSymbol(), PriceSnapshot.missing(asset.getSymbol()));
 
-        BigDecimal currentValueEur;
         BigDecimal averageCostEur = state.averageCostEur();
 
-        // - Si quantity == 0 : position soldée, pas besoin de prix, donc priceMissing =
-        // false
-        // - Si quantity > 0 et prix absent : priceMissing = true
+        // Position soldée : pas besoin de prix. Position ouverte sans cours :
+        // repli sur le prix de la dernière transaction, comme PortfolioHistoryService
+        // (le dashboard et la courbe doivent donner le même chiffre).
         boolean priceMissing = quantity.signum() > 0 && price.missing();
+        BigDecimal unitPrice = price.missing() ? state.getLastTradePrice() : price.price();
+        String unitCurrency = price.missing() ? state.getLastTradeCurrency() : price.currency();
 
-        if (priceMissing || quantity.signum() == 0) {
-            currentValueEur = BigDecimal.ZERO;
-        } else {
-            BigDecimal priceEur = fxSession.toEur(price.price(), price.currency());
+        BigDecimal currentValueEur = BigDecimal.ZERO;
+        if (quantity.signum() > 0 && unitPrice != null) {
+            BigDecimal priceEur = fxSession.toEur(unitPrice, unitCurrency);
             currentValueEur = quantity.multiply(priceEur)
                     .setScale(MoneyConstants.MONEY_SCALE, MoneyConstants.ROUNDING);
         }
@@ -210,8 +211,8 @@ public class PortfolioValuationService {
                 .realizedGainEur(state.getRealizedEur())
                 .dividendsEur(state.getDividendsEur())
                 .totalFeesEur(state.getFeesEur())
-                .lastPrice(price.price())
-                .priceCurrency(price.currency())
+                .lastPrice(unitPrice)
+                .priceCurrency(unitCurrency)
                 .priceAsOf(price.asOf())
                 .priceMissing(priceMissing)
                 .build();

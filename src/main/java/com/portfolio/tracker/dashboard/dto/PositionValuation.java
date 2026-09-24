@@ -46,6 +46,6 @@ public class PositionValuation {
     private String priceCurrency;
     private LocalDateTime priceAsOf;
 
-    /** true si aucun prix n'était disponible : la valorisation est incomplète. */
+    /** true si aucun cours de marché : valorisé au prix de la dernière transaction (estimation). */
     private boolean priceMissing;
 }

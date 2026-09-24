@@ -14,11 +14,13 @@ public class CustomUserDetails implements UserDetails {
     private final UUID id;
     private final String email;
     private final String password;
+    private final boolean admin;
 
-    public CustomUserDetails(User user) {
+    public CustomUserDetails(User user, boolean admin) {
         this.id = user.getId();
         this.email = user.getEmail();
         this.password = user.getPassword();
+        this.admin = admin;
     }
 
     public UUID getId() {
@@ -27,7 +29,9 @@ public class CustomUserDetails implements UserDetails {
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
-        return List.of(new SimpleGrantedAuthority("USER"));
+        return admin
+                ? List.of(new SimpleGrantedAuthority("ROLE_USER"), new SimpleGrantedAuthority("ROLE_ADMIN"))
+                : List.of(new SimpleGrantedAuthority("ROLE_USER"));
     }
 
     @Override

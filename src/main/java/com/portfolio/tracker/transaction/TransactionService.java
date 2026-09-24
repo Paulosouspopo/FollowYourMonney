@@ -25,6 +25,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -33,6 +35,8 @@ import java.util.UUID;
 @Slf4j
 @Transactional(readOnly = true)
 public class TransactionService {
+
+        private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
         private final TransactionRepository transactionRepository;
         private final AssetRepository assetRepository;
@@ -45,13 +49,24 @@ public class TransactionService {
 
         // ---------------------------------------------------------------- lectures
 
-        public List<TransactionResponse> findByAssetSymbolAndPortfolioId(String assetSymbol,
-                        UUID portfolioId,
-                        UUID userId) {
+        /**
+         * Transactions d'un portefeuille, plus récentes d'abord.
+         *
+         * @param assetSymbol filtre optionnel sur un actif du portefeuille
+         */
+        public List<TransactionResponse> findByPortfolio(UUID portfolioId, String assetSymbol, UUID userId) {
+                if (assetSymbol == null || assetSymbol.isBlank()) {
+                        portfolioRepository.findByIdAndUserId(portfolioId, userId)
+                                        .orElseThrow(() -> new ResourceNotFoundException("Portfolio non accessible"));
+                        return transactionRepository.findByPortfolioIdAndUserId(portfolioId, userId).stream()
+                                        .map(transactionMapper::toResponse)
+                                        .toList();
+                }
                 if (!assetRepository.existsBySymbolAndPortfolioIdAndUserId(assetSymbol, portfolioId, userId)) {
                         throw new ResourceNotFoundException("Asset", assetSymbol);
                 }
-                return transactionRepository.findByAssetSymbolAndUserId(assetSymbol, userId).stream()
+                return transactionRepository
+                                .findByAssetSymbolAndPortfolioIdAndUserId(assetSymbol, portfolioId, userId).stream()
                                 .map(transactionMapper::toResponse)
                                 .toList();
         }
@@ -78,7 +93,8 @@ public class TransactionService {
                                 .findBySymbolAndPortfolioIdAndUserId(symbol, portfolioId, userId)
                                 .orElseGet(() -> createAssetFromMarket(symbol, portfolio));
 
-                String currency = resolveCurrency(request.currency());
+                // Défaut : devise de cotation de l'actif (et non EUR, faux pour AAPL)
+                String currency = resolveCurrency(request.currency(), asset);
                 BigDecimal fees = nullSafe(request.fees());
 
                 BigDecimal totalAmount = request.quantity()
@@ -108,6 +124,11 @@ public class TransactionService {
                                 .transactionDate(transactionDate)
                                 .notes(request.notes())
                                 .build();
+
+                List<Transaction> assetTxs = new ArrayList<>(
+                                transactionRepository.findByAssetIdAndUserId(asset.getId(), userId));
+                assetTxs.add(transaction);
+                checkQuantityNeverNegative(assetTxs);
 
                 Transaction saved = transactionRepository.save(transaction);
                 log.debug("Transaction {} créée : {} {} {} @ {} {} (taux EUR {})",
@@ -186,6 +207,10 @@ public class TransactionService {
                 existing.setTotalAmountEur(toEur(totalAmount, rateToEur));
                 existing.setFeesEur(toEur(fees, rateToEur));
 
+                // `existing` est l'instance gérée : la liste la contient déjà modifiée
+                checkQuantityNeverNegative(transactionRepository.findByAssetIdAndUserId(
+                                existing.getAsset().getId(), userId));
+
                 Transaction saved = transactionRepository.save(existing);
 
                 // Recalcul depuis la plus ancienne des deux dates
@@ -202,6 +227,11 @@ public class TransactionService {
         public void deleteById(UUID transactionId, UUID userId) {
                 Transaction transaction = transactionRepository.findByIdAndUserId(transactionId, userId)
                                 .orElseThrow(() -> new ResourceNotFoundException("Transaction non accessible"));
+                // Supprimer un achat ne doit pas rendre une vente ultérieure impossible
+                checkQuantityNeverNegative(transactionRepository
+                                .findByAssetIdAndUserId(transaction.getAsset().getId(), userId).stream()
+                                .filter(t -> !t.getId().equals(transactionId))
+                                .toList());
                 transactionRepository.delete(transaction);
 
                 eventPublisher.publishEvent(new PortfolioHistoryChangedEvent(
@@ -209,21 +239,49 @@ public class TransactionService {
                                 transaction.getTransactionDate().toLocalDate()));
         }
 
+        /**
+         * totalAmount = quantity × pricePerUnit pour TOUS les types : un dividende
+         * à quantité ou prix nul vaudrait 0. Pour un dividende, quantity = nombre
+         * de titres (ou 1) et pricePerUnit = montant par titre (ou montant total).
+         */
         private void validateBusinessRules(TransactionType type, BigDecimal quantity, BigDecimal pricePerUnit) {
-                if (type != TransactionType.DIVIDEND && quantity.compareTo(BigDecimal.ZERO) <= 0) {
-                        throw new IllegalArgumentException(
-                                        "La quantité doit être strictement positive pour un achat ou une vente");
+                if (quantity.compareTo(BigDecimal.ZERO) <= 0) {
+                        throw new IllegalArgumentException("La quantité doit être strictement positive");
                 }
-                if (type != TransactionType.DIVIDEND && pricePerUnit.compareTo(BigDecimal.ZERO) <= 0) {
-                        throw new IllegalArgumentException(
-                                        "Le prix unitaire doit être strictement positif pour un achat ou une vente");
+                if (pricePerUnit.compareTo(BigDecimal.ZERO) <= 0) {
+                        throw new IllegalArgumentException(type == TransactionType.DIVIDEND
+                                        ? "Le montant du dividende doit être strictement positif"
+                                        : "Le prix unitaire doit être strictement positif");
                 }
         }
 
-        private String resolveCurrency(String requested) {
-                return (requested == null || requested.isBlank())
-                                ? MoneyConstants.BASE_CURRENCY
-                                : requested.toUpperCase();
+        /**
+         * Rejoue les opérations d'un actif : à aucun moment une vente ne doit
+         * dépasser la quantité détenue (pas de vente à découvert).
+         */
+        private void checkQuantityNeverNegative(List<Transaction> assetTxs) {
+                BigDecimal held = BigDecimal.ZERO;
+                for (Transaction tx : assetTxs.stream().sorted(Transaction.CHRONOLOGICAL).toList()) {
+                        if (tx.getType() == TransactionType.BUY) {
+                                held = held.add(tx.getQuantity());
+                        } else if (tx.getType() == TransactionType.SELL) {
+                                if (tx.getQuantity().compareTo(held) > 0) {
+                                        throw new IllegalArgumentException(String.format(
+                                                        "Vente de %s impossible le %s : seulement %s détenu(s) à cette date",
+                                                        tx.getQuantity().stripTrailingZeros().toPlainString(),
+                                                        tx.getTransactionDate().toLocalDate().format(DAY),
+                                                        held.stripTrailingZeros().toPlainString()));
+                                }
+                                held = held.subtract(tx.getQuantity());
+                        }
+                }
+        }
+
+        private String resolveCurrency(String requested, Asset asset) {
+                if (requested != null && !requested.isBlank()) {
+                        return requested.toUpperCase();
+                }
+                return asset.getCurrency() != null ? asset.getCurrency().toUpperCase() : MoneyConstants.BASE_CURRENCY;
         }
 
         private BigDecimal nullSafe(BigDecimal value) {

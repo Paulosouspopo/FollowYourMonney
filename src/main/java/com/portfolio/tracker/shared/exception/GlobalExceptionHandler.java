@@ -1,5 +1,10 @@
 package com.portfolio.tracker.shared.exception;
 
+import jakarta.validation.ConstraintViolationException;
+import org.springframework.context.MessageSourceResolvable;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
+import java.util.Objects;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -44,6 +49,26 @@ public class GlobalExceptionHandler {
                 .build();
 
         return ResponseEntity.badRequest().body(error);
+    }
+
+    /** Contraintes sur @RequestParam / @PathVariable (validation de méthode Spring 6.1+). */
+    @ExceptionHandler(HandlerMethodValidationException.class)
+    public ResponseEntity<ErrorResponse> handleMethodValidation(HandlerMethodValidationException ex) {
+        String message = ex.getAllErrors().stream()
+                .map(MessageSourceResolvable::getDefaultMessage)
+                .filter(Objects::nonNull)
+                .collect(Collectors.joining(", "));
+        return buildErrorResponse(HttpStatus.BAD_REQUEST, message.isBlank() ? "Paramètre invalide" : message);
+    }
+
+    @ExceptionHandler(ConstraintViolationException.class)
+    public ResponseEntity<ErrorResponse> handleConstraintViolation(ConstraintViolationException ex) {
+        return buildErrorResponse(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ErrorResponse> handleAccessDenied(AccessDeniedException ex) {
+        return buildErrorResponse(HttpStatus.FORBIDDEN, "Accès refusé");
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

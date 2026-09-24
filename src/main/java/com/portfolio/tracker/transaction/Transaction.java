@@ -8,6 +8,7 @@ import org.hibernate.annotations.UpdateTimestamp;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.UUID;
 
 /**
@@ -32,6 +33,11 @@ import java.util.UUID;
 @Builder
 public class Transaction {
 
+    /** Ordre de rejeu : date d'opération, puis ordre de saisie (départage deux opérations à la même heure). */
+    public static final Comparator<Transaction> CHRONOLOGICAL = Comparator
+            .comparing(Transaction::getTransactionDate)
+            .thenComparing(Transaction::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder()));
+
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
@@ -44,7 +50,7 @@ public class Transaction {
     @Column(nullable = false, length = 20)
     private TransactionType type;
 
-    /** Pour DIVIDEND : quantité de titres ayant généré le dividende (ou 0). */
+    /** Pour DIVIDEND : nombre de titres ayant généré le dividende, ou 1 si pricePerUnit est le montant total. */
     @Column(nullable = false, precision = 19, scale = 8)
     private BigDecimal quantity;
 

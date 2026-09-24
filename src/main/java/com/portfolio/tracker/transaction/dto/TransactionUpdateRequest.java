@@ -17,11 +17,11 @@ public record TransactionUpdateRequest(
         TransactionType type,
 
         @NotNull(message = "La quantité est obligatoire")
-        @DecimalMin(value = "0.0", message = "La quantité doit être positive ou nulle")
+        @DecimalMin(value = "0.0", inclusive = false, message = "La quantité doit être strictement positive")
         BigDecimal quantity,
 
         @NotNull(message = "Le prix par unité est obligatoire")
-        @DecimalMin(value = "0.0", message = "Le prix par unité doit être positif ou nul")
+        @DecimalMin(value = "0.0", inclusive = false, message = "Le prix doit être strictement positif")
         BigDecimal pricePerUnit,
 
         @DecimalMin(value = "0.0", message = "Les frais doivent être positifs ou nuls")

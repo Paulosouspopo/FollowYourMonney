@@ -79,8 +79,25 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
 - Synchrone volontairement (dev). Passage en async : exécuter
   `PortfolioHistoryListener.refreshDirty` sur un executor.
 
+## Règles métier des transactions
+- `quantity > 0` et `pricePerUnit > 0` pour tous les types (`totalAmount =
+  quantity × pricePerUnit`, y compris un dividende : le front envoie
+  `quantity = 1` + montant total).
+- Pas de vente à découvert : à aucune date une vente ne dépasse la quantité
+  détenue (vérifié à la création, la modification ET la suppression).
+- Devise absente → devise de cotation de l'actif.
+- Ordre de rejeu : `Transaction.CHRONOLOGICAL` (date puis `createdAt`),
+  identique pour la valorisation et l'historique.
+- Aucun cours de marché → valorisation au prix de la dernière transaction
+  (`priceMissing = true`), dashboard comme courbe.
+
+## Sécurité
+- Rôle ADMIN = emails listés dans `app.admin.emails` (pas de rôle en base).
+  Requis pour `/api/admin/**`, `POST /api/asset-prices/**` et les
+  `@PreAuthorize` (`@EnableMethodSecurity` actif).
+
 ## Points sensibles / dette technique restante
-- Endpoints `/api/admin/**` accessibles à tout utilisateur authentifié.
+- Flyway activé sans migrations alors que `ddl-auto=update` (à trancher).
 - Le job horaire recalcule le point du jour de TOUS les portefeuilles
   (OK à petite échelle ; à cibler sur les portefeuilles détenant les
   symboles mis à jour si le volume grossit).

@@ -370,18 +370,22 @@ class PortfolioValuationServiceTest {
     class PrixManquant {
 
         @Test
-        @DisplayName("Aucun prix en base → position visible, valeur 0, flag priceMissing")
-        void prixManquantNeCasseRien() {
-            givenTransactions(tx(TransactionType.BUY, "1", "30000", "0", 10));
+        @DisplayName("Aucun prix en base → valorisé au prix de la dernière transaction, flag priceMissing")
+        void prixManquantReplieSurDerniereTransaction() {
+            givenTransactions(
+                    tx(TransactionType.BUY, "1", "30000", "0", 10),
+                    tx(TransactionType.BUY, "1", "32000", "0", 5));
             givenNoPrice();
 
             PositionValuation pos = firstPosition(valuationService.valuate(userId, null, null));
 
             assertThat(pos.isPriceMissing()).isTrue();
-            assertThat(pos.getQuantity()).isEqualByComparingTo("1");
-            assertThat(pos.getInvestedEur()).isEqualByComparingTo("30000.00");
-            assertThat(pos.getCurrentValueEur()).isEqualByComparingTo("0.00");
-            assertThat(pos.getUnrealizedGainEur()).isEqualByComparingTo("-30000.00");
+            assertThat(pos.getQuantity()).isEqualByComparingTo("2");
+            assertThat(pos.getInvestedEur()).isEqualByComparingTo("62000.00");
+            // Jamais 0 : même repli que la courbe historique
+            assertThat(pos.getCurrentValueEur()).isEqualByComparingTo("64000.00");
+            assertThat(pos.getLastPrice()).isEqualByComparingTo("32000");
+            assertThat(pos.getUnrealizedGainEur()).isEqualByComparingTo("2000.00");
         }
 
         @Test
