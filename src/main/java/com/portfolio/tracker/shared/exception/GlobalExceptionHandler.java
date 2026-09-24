@@ -1,6 +1,8 @@
 package com.portfolio.tracker.shared.exception;
 
+import com.portfolio.tracker.imports.ImportRowException;
 import jakarta.validation.ConstraintViolationException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.context.MessageSourceResolvable;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
@@ -99,6 +101,27 @@ public class GlobalExceptionHandler {
                         .code("RATE_LIMITED")
                         .message(ex.getMessage())
                         .build());
+    }
+
+    /** Ligne d'import refusée : désignée au front par le champ « row:<id> ». */
+    @ExceptionHandler(ImportRowException.class)
+    public ResponseEntity<ErrorResponse> handleImportRow(ImportRowException ex) {
+        return ResponseEntity.badRequest().body(ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.BAD_REQUEST.value())
+                .error(HttpStatus.BAD_REQUEST.getReasonPhrase())
+                .code("IMPORT_ROW_ERROR")
+                .message(ex.getMessage())
+                .fieldErrors(List.of(ErrorResponse.FieldError.builder()
+                        .field("row:" + ex.getRowId())
+                        .message(ex.getMessage())
+                        .build()))
+                .build());
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ErrorResponse> handleUploadTooLarge(MaxUploadSizeExceededException ex) {
+        return buildErrorResponse(HttpStatus.PAYLOAD_TOO_LARGE, "Fichier trop volumineux (5 Mo maximum)");
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

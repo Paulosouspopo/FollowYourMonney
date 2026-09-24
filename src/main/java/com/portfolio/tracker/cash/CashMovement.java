@@ -51,6 +51,10 @@ public class CashMovement {
     @Column(length = 500)
     private String notes;
 
+    /** Référence dans le relevé importé (anti-doublon), null pour une saisie manuelle. */
+    @Column(name = "external_ref", length = 100)
+    private String externalRef;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;

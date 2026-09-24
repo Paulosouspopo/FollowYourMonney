@@ -1,0 +1,11 @@
+"datetime","date","account_type","category","type","asset_class","name","symbol","shares","price","amount","fee","tax","currency","original_amount","original_currency","fx_rate","description","transaction_id","counterparty_name","counterparty_iban","payment_reference","mcc_code"
+
+"2026-01-10T09:00:00Z","2026-01-10","DEFAULT","CASH","TRANSFER_INBOUND","","","","","","1000.000000","","","EUR","","","","Incoming transfer from TEST USER","tr-1","","","",""
+"2026-01-10T10:00:00Z","2026-01-10","DEFAULT","TRADING","BUY","STOCK","Fake Corp","US0000000001","2.0000000000","100.000000","-200.00","-1.00","-0.60","EUR","","","","","tr-2","","","",""
+"2026-01-10T23:30:00Z","2026-01-10","DEFAULT","TRADING","BUY","CRYPTO","Bitcoin","BTC","0.0010000000","50000.0000000000","-50.00","-1.00","","EUR","","","","Savings plan execution XF000BTC0017 Bitcoin, quantity: 0.001","tr-3","","","",""
+"2026-02-01T08:00:00Z","2026-02-01","DEFAULT","CASH","DIVIDEND","STOCK","Fake Corp","US0000000001","2.0000000000","","1.430000","","-0.22","EUR","","","","Cash Dividend for ISIN US0000000001","tr-4","","","",""
+"2026-02-02T08:00:00Z","2026-02-02","DEFAULT","DELIVERY","MIGRATION","STOCK","Fake Corp","US0000000001","-2.0000000000","101.0000000000","","","","EUR","","","","MIGRATION US0000000001","tr-5","","","",""
+"2026-02-03T08:00:00Z","2026-02-03","DEFAULT","TRADING","SELL","STOCK","Fake Corp","US0000000001","-1.0000000000","110.000000","110.00","-1.00","","EUR","","","","","tr-6","","","",""
+"2026-02-04T08:00:00Z","2026-02-04","DEFAULT","CASH","CUSTOMER_OUTBOUND_REQUEST","","TEST USER","","","","-50.000000","","","EUR","","","","20260204-abc","tr-7","","","",""
+"2026-02-05T08:00:00Z","2026-02-05","DEFAULT","CASH","STOCKPERK","STOCK","Fake Corp","US0000000001","","","5.000000","","","EUR","","","","Stockperk","tr-8","","","",""
+"2026-02-06T08:00:00Z","2026-02-06","DEFAULT","CASH","SOMETHING_NEW","","","","","","1.000000","","","EUR","","","","","tr-9","","","",""

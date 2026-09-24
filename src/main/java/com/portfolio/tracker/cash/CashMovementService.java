@@ -46,12 +46,18 @@ public class CashMovementService {
 
     @Transactional
     public CashMovementResponse create(UUID portfolioId, CashMovementRequest request, UUID userId) {
+        return create(portfolioId, request, userId, null);
+    }
+
+    /** Création depuis un import, avec la référence dans le relevé (anti-doublon). */
+    @Transactional
+    public CashMovementResponse create(UUID portfolioId, CashMovementRequest request, UUID userId, String externalRef) {
         Portfolio portfolio = getPortfolio(portfolioId, userId);
         if (!portfolio.isCashTracking()) {
             throw new BadRequestException(
                     "Active le suivi des liquidités de ce portefeuille pour saisir des versements et retraits");
         }
-        CashMovement movement = CashMovement.builder().portfolio(portfolio).build();
+        CashMovement movement = CashMovement.builder().portfolio(portfolio).externalRef(externalRef).build();
         apply(movement, request);
 
         List<CashMovement> all = new ArrayList<>(movementRepository.findAllByPortfolioIdForHistory(portfolioId));

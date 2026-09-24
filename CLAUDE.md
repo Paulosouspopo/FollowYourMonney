@@ -116,6 +116,42 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
   portefeuille avec actifs ne peut pas devenir un livret.
 - Répartition : catégorie = type d'actif, `LIVRET`, ou `LIQUIDITES`.
 
+## Import de relevés (`imports/`)
+- API : `POST /api/imports/inspect` (format détecté + extrait), `POST
+  /api/imports/preview` (multipart : fichier + partie JSON `options`), `POST
+  /api/imports/commit`. Le fichier n'est jamais stocké.
+- `CsvReader` : UTF-8 (BOM) ou ISO-8859-1, séparateur détecté, guillemets.
+- Un `StatementParser` par courtier (Fortuneo, Trade Republic, Binance) +
+  `GenericParser` (colonnes associées par l'utilisateur). Sans réseau ni base :
+  produisent des `ImportedOperation` (READY / IGNORED avec raison).
+  - Fortuneo : pas d'ISIN → recherche par libellé ; OST de coupon ignorées.
+  - Trade Republic : `transaction_id` = référence ; MIGRATION ignorée ;
+    dividende brut = net + taxe ; horodatage UTC → heure de Paris.
+  - Binance : grand livre → jambes regroupées (même Remark ou < 2 s) ;
+    crypto→crypto = vente + achat estimés au cours de clôture du jour ;
+    récompenses (Crypto Box...) et conversion de leurs poussières ignorées.
+- `AssetResolver` : mémoire (`import_asset_mappings`) → ISIN → paire
+  `CODE-EUR` → `CODE-USD` → recherche par nom. Seuls REMEMBERED/CERTAIN sont
+  acceptés d'office ; l'utilisateur valide le reste (jamais de saisie de symbole).
+- Doublons : `external_ref` (identifiant du courtier ou empreinte de la ligne)
+  sur `transactions` / `cash_movements`, + heuristique (même jour, type,
+  actif, quantité / montant). Réimporter le même relevé ne crée rien.
+- Validation : tout passe par `TransactionService` / `CashMovementService`
+  (mêmes règles qu'une saisie), dans une transaction : une ligne invalide
+  annule tout (`ImportRowException` → 400, champ `row:<id>`). Un seul
+  recalcul d'historique à la fin.
+- Tests sur des relevés FICTIFS (`src/test/resources/imports`). Les exports
+  réels de l'utilisateur sont dans `examples-imports/` : gitignoré, ne JAMAIS
+  les commiter ni en recopier le contenu.
+
+## Dev local : antivirus Avast
+- Avast (« Web/Mail Shield », analyse HTTPS) re-signe tout le trafic HTTPS :
+  Java refuse alors Yahoo (`PKIX path building failed`), git et Docker aussi.
+- Contournement : lancer la JVM avec
+  `-Djavax.net.ssl.trustStoreType=Windows-ROOT` (magasin de certificats
+  Windows), git avec `http.sslBackend=schannel` ; ou désactiver l'analyse
+  HTTPS d'Avast.
+
 ## Sécurité
 - **Session** : JWT d'accès court (15 min, en-tête `Authorization`) + jeton
   de renouvellement opaque (30 j) dans le cookie `fym_refresh` (HttpOnly,

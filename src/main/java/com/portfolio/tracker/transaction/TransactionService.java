@@ -81,6 +81,16 @@ public class TransactionService {
 
         @Transactional
         public TransactionResponse create(UUID portfolioId, TransactionCreateRequest request, UUID userId) {
+                return create(portfolioId, request, userId, null);
+        }
+
+        /**
+         * Création depuis un import : mêmes règles qu'une saisie, avec la
+         * référence de l'opération dans le relevé (anti-doublon).
+         */
+        @Transactional
+        public TransactionResponse create(UUID portfolioId, TransactionCreateRequest request, UUID userId,
+                        String externalRef) {
 
                 validateBusinessRules(request.type(), request.quantity(), request.pricePerUnit());
 
@@ -129,6 +139,7 @@ public class TransactionService {
                                 .feesEur(toEur(fees, rateToEur))
                                 .transactionDate(transactionDate)
                                 .notes(request.notes())
+                                .externalRef(externalRef)
                                 .build();
 
                 List<Transaction> assetTxs = new ArrayList<>(
