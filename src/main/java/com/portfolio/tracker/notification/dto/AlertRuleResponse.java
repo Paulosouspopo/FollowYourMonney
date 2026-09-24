@@ -18,7 +18,10 @@ public record AlertRuleResponse(
         BigDecimal threshold,
         AlertRule.Period period,
         boolean notifyEmail,
+        boolean notifyPush,
         boolean enabled,
+        String label,
+        LocalDateTime mutedUntil,
         LocalDateTime lastTriggeredAt,
         String description
 ) {}

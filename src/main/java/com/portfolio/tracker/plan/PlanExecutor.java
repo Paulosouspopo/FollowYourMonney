@@ -79,11 +79,29 @@ public class PlanExecutor {
         }
         log.info("Investissements programmés : {} plan(s) à exécuter", ids.size());
         for (UUID id : ids) {
+            String previousError = lastError(id);
             int executed = run(id);
             if (executed > 0) {
                 notifyExecuted(id, executed);
             }
+            String error = lastError(id);
+            if (error != null && !error.equals(previousError)) {
+                notifyProblem(id, error);
+            }
         }
+    }
+
+    private String lastError(UUID planId) {
+        return txNew.execute(s -> planRepository.findById(planId).map(InvestmentPlan::getLastError).orElse(null));
+    }
+
+    /** Un nouveau problème (cours introuvable, montant insuffisant...) : prévenu une fois, pas à chaque essai. */
+    private void notifyProblem(UUID planId, String error) {
+        txNew.executeWithoutResult(s -> planRepository.findById(planId).ifPresent(plan ->
+                notificationService.notify(plan.getPortfolio().getUser().getId(), Notification.Type.PLAN,
+                        "⚠️ Investissement programmé : " + plan.getName(),
+                        error + "\n\nL'échéance sera retentée automatiquement ; vérifie le plan si le problème persiste.",
+                        "/portfolios/" + plan.getPortfolio().getId(), false)));
     }
 
     /** Prévient l'utilisateur des échéances exécutées par le job (pas lors d'une saisie : il le sait déjà). */

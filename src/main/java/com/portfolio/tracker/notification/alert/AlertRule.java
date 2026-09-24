@@ -27,20 +27,42 @@ public class AlertRule {
     public enum Scope { GLOBAL, PORTFOLIO, ASSET }
 
     /**
-     * RISES / FALLS / MOVES : variation en % sur la période ; ABOVE / BELOW :
-     * valeur (patrimoine, portefeuille) ou cours (actif) en EUR.
+     * <ul>
+     * <li>RISES / FALLS / MOVES : variation en % sur la période ;</li>
+     * <li>ABOVE / BELOW : valeur (patrimoine, portefeuille) ou cours (actif) en EUR ;</li>
+     * <li>PROFIT_ABOVE / LOSS_BELOW : plus-value / moins-value latente en % du prix de revient ;</li>
+     * <li>NEW_HIGH / NEW_LOW : cours d'un actif au plus haut / plus bas de la période (sans seuil) ;</li>
+     * <li>WEIGHT_ABOVE : poids d'un actif ou d'un portefeuille dans le patrimoine, en %.</li>
+     * </ul>
      */
     public enum Condition {
-        RISES, FALLS, MOVES, ABOVE, BELOW;
+        RISES, FALLS, MOVES, ABOVE, BELOW, PROFIT_ABOVE, LOSS_BELOW, NEW_HIGH, NEW_LOW, WEIGHT_ABOVE;
 
+        /** Seuil exprimé en % (sinon en EUR, ou pas de seuil). */
         public boolean isPercentage() {
+            return isVariation() || this == PROFIT_ABOVE || this == LOSS_BELOW || this == WEIGHT_ABOVE;
+        }
+
+        public boolean isVariation() {
             return this == RISES || this == FALLS || this == MOVES;
+        }
+
+        public boolean isExtreme() {
+            return this == NEW_HIGH || this == NEW_LOW;
+        }
+
+        public boolean hasThreshold() {
+            return !isExtreme();
+        }
+
+        public boolean usesPeriod() {
+            return isVariation() || isExtreme();
         }
     }
 
-    /** Période d'une variation : depuis la clôture de la veille, 7 jours, 30 jours. */
+    /** Période d'une variation ou d'un record : depuis la veille, 7 jours, 30 jours, 1 an. */
     public enum Period {
-        DAY(1), WEEK(7), MONTH(30);
+        DAY(1), WEEK(7), MONTH(30), YEAR(365);
 
         private final int days;
 
@@ -92,6 +114,18 @@ public class AlertRule {
     @Column(nullable = false)
     @Builder.Default
     private boolean enabled = true;
+
+    /** Nom libre, remplace la description automatique dans le titre de la notification. */
+    @Column(length = 100)
+    private String label;
+
+    @Column(name = "notify_push", nullable = false)
+    @Builder.Default
+    private boolean notifyPush = true;
+
+    /** Sourdine : pas d'évaluation avant cette date. */
+    @Column(name = "muted_until")
+    private LocalDateTime mutedUntil;
 
     /** false après un déclenchement : pas de rappel tant que la condition reste vraie. */
     @Column(nullable = false)

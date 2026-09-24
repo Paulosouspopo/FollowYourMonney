@@ -18,4 +18,7 @@ public interface AlertRuleRepository extends JpaRepository<AlertRule, UUID> {
 
     @Query("SELECT r FROM AlertRule r LEFT JOIN FETCH r.portfolio WHERE r.enabled = true ORDER BY r.userId")
     List<AlertRule> findAllEnabled();
+
+    @Query("SELECT DISTINCT r.symbol FROM AlertRule r WHERE r.enabled = true AND r.symbol IS NOT NULL")
+    List<String> findDistinctAssetSymbols();
 }

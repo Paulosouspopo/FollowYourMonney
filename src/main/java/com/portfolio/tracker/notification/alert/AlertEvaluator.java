@@ -3,6 +3,9 @@ package com.portfolio.tracker.notification.alert;
 import com.portfolio.tracker.assetprice.MarketPriceLookup;
 import com.portfolio.tracker.dashboard.PortfolioValuationService;
 import com.portfolio.tracker.dashboard.dto.PortfolioValuation;
+import com.portfolio.tracker.dashboard.dto.PositionValuation;
+import com.portfolio.tracker.marketdata.MarketDataProvider;
+import com.portfolio.tracker.marketdata.MarketQuote;
 import com.portfolio.tracker.dashboard.dto.ValuationResult;
 import com.portfolio.tracker.notification.Formats;
 import com.portfolio.tracker.notification.Notification;
@@ -36,12 +39,19 @@ import java.util.stream.Collectors;
  * <li>portefeuille / patrimoine : variation de la PLUS-VALUE rapportée à la
  * valeur de départ. Un versement, un achat ou une vente ne change pas la
  * plus-value : ils ne déclenchent donc pas de fausse « hausse de 10 % » ;</li>
- * <li>seuils ABOVE / BELOW : valeur ou cours actuel en EUR.</li>
+ * <li>seuils ABOVE / BELOW : valeur ou cours actuel en EUR ;</li>
+ * <li>PROFIT_ABOVE / LOSS_BELOW : plus-value latente / prix de revient des
+ * positions (un actif non détenu n'a pas de mesure) ;</li>
+ * <li>NEW_HIGH / NEW_LOW : cours actuel (devise de cotation) vs plus haut /
+ * plus bas des clôtures de la période, mesuré en % d'écart ;</li>
+ * <li>WEIGHT_ABOVE : valeur de l'actif (toutes lignes) ou du portefeuille /
+ * patrimoine total.</li>
  * </ul>
  * Anti-répétition : une règle déclenchée est désarmée jusqu'à ce que sa
- * condition redevienne fausse. Pour une variation sur 1 jour, elle est aussi
- * réarmée chaque nouveau jour (une nouvelle baisse de 3 % demain est une
- * nouvelle information).
+ * condition redevienne fausse. Pour une variation sur 1 jour ou un record,
+ * elle est aussi réarmée chaque nouveau jour (une nouvelle baisse de 3 %
+ * demain, un nouveau record, sont de nouvelles informations).
+ * Une règle en sourdine ({@code mutedUntil} futur) n'est pas évaluée.
  */
 @Component
 @Slf4j
@@ -51,6 +61,7 @@ public class AlertEvaluator {
     private final PortfolioValuationService valuationService;
     private final PortfolioSnapshotRepository snapshotRepository;
     private final MarketPriceLookup priceLookup;
+    private final MarketDataProvider marketDataProvider;
     private final NotificationService notificationService;
     private final TransactionTemplate tx;
 
@@ -58,12 +69,14 @@ public class AlertEvaluator {
             PortfolioValuationService valuationService,
             PortfolioSnapshotRepository snapshotRepository,
             MarketPriceLookup priceLookup,
+            MarketDataProvider marketDataProvider,
             NotificationService notificationService,
             PlatformTransactionManager transactionManager) {
         this.ruleRepository = ruleRepository;
         this.valuationService = valuationService;
         this.snapshotRepository = snapshotRepository;
         this.priceLookup = priceLookup;
+        this.marketDataProvider = marketDataProvider;
         this.notificationService = notificationService;
         this.tx = new TransactionTemplate(transactionManager);
     }
@@ -81,9 +94,13 @@ public class AlertEvaluator {
         Map<UUID, List<AlertRule>> byUser = rules.stream()
                 .collect(Collectors.groupingBy(AlertRule::getUserId, LinkedHashMap::new, Collectors.toList()));
         int fired = 0;
+        LocalDateTime now = LocalDateTime.now();
         for (Map.Entry<UUID, List<AlertRule>> entry : byUser.entrySet()) {
             UserContext ctx = new UserContext(entry.getKey());
             for (AlertRule rule : entry.getValue()) {
+                if (rule.getMutedUntil() != null && rule.getMutedUntil().isAfter(now)) {
+                    continue;
+                }
                 try {
                     if (evaluate(rule, ctx)) {
                         fired++;
@@ -112,12 +129,16 @@ public class AlertEvaluator {
             case RISES -> v.compareTo(t) >= 0;
             case FALLS -> v.compareTo(t.negate()) <= 0;
             case MOVES -> v.abs().compareTo(t) >= 0;
-            case ABOVE -> v.compareTo(t) >= 0;
+            case ABOVE, PROFIT_ABOVE, WEIGHT_ABOVE -> v.compareTo(t) >= 0;
             case BELOW -> v.compareTo(t) <= 0;
+            case LOSS_BELOW -> v.compareTo(t.negate()) <= 0;
+            case NEW_HIGH -> v.signum() > 0;
+            case NEW_LOW -> v.signum() < 0;
         };
 
+        boolean daily = rule.getPeriod() == AlertRule.Period.DAY || rule.getCondition().isExtreme();
         boolean armed = rule.isArmed()
-                || (rule.getPeriod() == AlertRule.Period.DAY && rule.getLastTriggeredAt() != null
+                || (daily && rule.getLastTriggeredAt() != null
                         && rule.getLastTriggeredAt().toLocalDate().isBefore(today));
         if (met && armed) {
             fire(rule, measure.get());
@@ -130,34 +151,62 @@ public class AlertEvaluator {
     }
 
     private void fire(AlertRule rule, Measure measure) {
-        String title = title(rule, measure.value());
-        String body = measure.detail() + "\n\nAlerte : " + AlertRuleDescriber.describe(rule) + ".";
-        String link = rule.getScope() == AlertRule.Scope.PORTFOLIO && rule.getPortfolio() != null
-                ? "/portfolios/" + rule.getPortfolio().getId() : "/";
+        String auto = title(rule, measure.value());
+        String title = rule.getLabel() != null ? "🔔 " + rule.getLabel() : auto;
+        String body = (rule.getLabel() != null ? auto + "\n" : "") + measure.detail()
+                + "\n\nAlerte : " + AlertRuleDescriber.describe(rule) + ".";
+        String link = switch (rule.getScope()) {
+            case PORTFOLIO -> rule.getPortfolio() != null ? "/portfolios/" + rule.getPortfolio().getId() : "/";
+            case ASSET -> "/markets/" + java.net.URLEncoder.encode(rule.getSymbol(), java.nio.charset.StandardCharsets.UTF_8);
+            case GLOBAL -> "/";
+        };
         tx.executeWithoutResult(s -> {
             ruleRepository.findById(rule.getId()).ifPresent(r -> {
                 r.setArmed(false);
                 r.setLastTriggeredAt(LocalDateTime.now());
             });
-            notificationService.notify(rule.getUserId(), Notification.Type.ALERT, title, body, link, rule.isNotifyEmail());
+            notificationService.notify(rule.getUserId(), Notification.Type.ALERT, title, body, link,
+                    rule.isNotifyEmail(), rule.isNotifyPush());
         });
     }
 
     private static String title(AlertRule rule, BigDecimal value) {
         String subject = rule.getScope() == AlertRule.Scope.ASSET ? rule.getSymbol() : AlertRuleDescriber.subject(rule);
-        if (rule.getCondition().isPercentage()) {
-            String icon = value.signum() >= 0 ? "📈" : "📉";
-            String when = rule.getPeriod() == AlertRule.Period.DAY ? "aujourd'hui"
-                    : rule.getPeriod() == AlertRule.Period.WEEK ? "sur 7 jours" : "sur 30 jours";
-            return icon + " " + subject + " " + Formats.signedPercent(value) + " " + when;
-        }
-        return "🎯 " + subject + (rule.getCondition() == AlertRule.Condition.ABOVE ? " au-dessus de " : " en dessous de ")
-                + Formats.eur(rule.getThreshold());
+        return switch (rule.getCondition()) {
+            case RISES, FALLS, MOVES -> {
+                String icon = value.signum() >= 0 ? "📈" : "📉";
+                String when = rule.getPeriod() == AlertRule.Period.DAY ? "aujourd'hui"
+                        : AlertRuleDescriber.period(rule.getPeriod());
+                yield icon + " " + subject + " " + Formats.signedPercent(value) + " " + when;
+            }
+            case ABOVE -> "🎯 " + subject + " au-dessus de " + Formats.eur(rule.getThreshold());
+            case BELOW -> "🎯 " + subject + " en dessous de " + Formats.eur(rule.getThreshold());
+            case PROFIT_ABOVE -> "💰 " + subject + " : " + Formats.signedPercent(value) + " de plus-value";
+            case LOSS_BELOW -> "⚠️ " + subject + " : " + Formats.signedPercent(value) + " de moins-value";
+            case NEW_HIGH -> "🚀 " + subject + " au plus haut " + AlertRuleDescriber.period(rule.getPeriod());
+            case NEW_LOW -> "🕳️ " + subject + " au plus bas " + AlertRuleDescriber.period(rule.getPeriod());
+            case WEIGHT_ABOVE -> "⚖️ " + subject + " pèse " + Formats.percent(value.setScale(1, RoundingMode.HALF_UP))
+                    + " du patrimoine";
+        };
     }
 
     // ------------------------------------------------------------------ mesures
 
     private Optional<Measure> measure(AlertRule rule, UserContext ctx, LocalDate today) {
+        switch (rule.getCondition()) {
+            case NEW_HIGH, NEW_LOW -> {
+                return measureExtreme(rule, today);
+            }
+            case PROFIT_ABOVE, LOSS_BELOW -> {
+                return measureLatent(rule, ctx);
+            }
+            case WEIGHT_ABOVE -> {
+                return measureWeight(rule, ctx);
+            }
+            default -> {
+                // variation ou seuil en EUR
+            }
+        }
         return switch (rule.getScope()) {
             case ASSET -> measureAsset(rule, today);
             case PORTFOLIO -> ctx.portfolio(rule.getPortfolio().getId())
@@ -217,11 +266,77 @@ public class AlertEvaluator {
                 + " de plus-value " + since(rule.getPeriod()) + ")."));
     }
 
+    /** Écart en % entre le cours actuel et le record précédent de la période (devise de cotation). */
+    private Optional<Measure> measureExtreme(AlertRule rule, LocalDate today) {
+        Optional<MarketQuote> quote = marketDataProvider.getQuote(rule.getSymbol());
+        if (quote.isEmpty() || quote.get().price() == null || quote.get().price().signum() <= 0) {
+            return Optional.empty();
+        }
+        MarketQuote q = quote.get();
+        LocalDate from = q.marketDate().minusDays(rule.getPeriod().days());
+        return priceLookup.closingRange(rule.getSymbol(), from, q.marketDate())
+                .filter(r -> r.days() >= Math.min(5, rule.getPeriod().days()))
+                .map(r -> {
+                    boolean high = rule.getCondition() == AlertRule.Condition.NEW_HIGH;
+                    BigDecimal record = high ? r.high() : r.low();
+                    BigDecimal pct = q.price().subtract(record).multiply(BigDecimal.valueOf(100))
+                            .divide(record, 4, RoundingMode.HALF_UP);
+                    return new Measure(pct, "Cours : " + Formats.money(q.price(), q.currency()) + " (précédent "
+                            + (high ? "plus haut" : "plus bas") + " " + AlertRuleDescriber.period(rule.getPeriod())
+                            + " : " + Formats.money(record, r.currency()) + ", " + Formats.signedPercent(pct) + ").");
+                });
+    }
+
+    /** Plus-value latente / prix de revient des positions concernées. */
+    private Optional<Measure> measureLatent(AlertRule rule, UserContext ctx) {
+        List<PositionValuation> positions = positions(rule, ctx);
+        BigDecimal cost = positions.stream().map(PositionValuation::getInvestedEur).reduce(BigDecimal.ZERO, BigDecimal::add);
+        if (cost.signum() <= 0) {
+            return Optional.empty(); // actif non détenu, portefeuille vide
+        }
+        BigDecimal gain = positions.stream().map(PositionValuation::getUnrealizedGainEur)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal pct = gain.multiply(BigDecimal.valueOf(100)).divide(cost, 4, RoundingMode.HALF_UP);
+        return Optional.of(new Measure(pct, "Plus-value latente : " + Formats.signedEur(gain) + " ("
+                + Formats.signedPercent(pct) + ") pour " + Formats.eur(cost) + " investis."));
+    }
+
+    private Optional<Measure> measureWeight(AlertRule rule, UserContext ctx) {
+        BigDecimal total = ctx.valuation().getTotalValueEur();
+        if (total == null || total.signum() <= 0) {
+            return Optional.empty();
+        }
+        BigDecimal part = rule.getScope() == AlertRule.Scope.PORTFOLIO
+                ? ctx.portfolio(rule.getPortfolio().getId()).map(PortfolioValuation::getCurrentValueEur).orElse(null)
+                : positions(rule, ctx).stream().map(PositionValuation::getCurrentValueEur)
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+        if (part == null || part.signum() <= 0) {
+            return Optional.empty();
+        }
+        BigDecimal pct = part.multiply(BigDecimal.valueOf(100)).divide(total, 4, RoundingMode.HALF_UP);
+        return Optional.of(new Measure(pct, "Valeur : " + Formats.eur(part) + " sur " + Formats.eur(total)
+                + " de patrimoine."));
+    }
+
+    /** Positions ouvertes du périmètre (un actif peut être détenu dans plusieurs portefeuilles). */
+    private static List<PositionValuation> positions(AlertRule rule, UserContext ctx) {
+        List<PortfolioValuation> portfolios = switch (rule.getScope()) {
+            case PORTFOLIO -> ctx.portfolio(rule.getPortfolio().getId()).map(List::of).orElse(List.of());
+            case ASSET, GLOBAL -> ctx.valuation().getPortfolios();
+        };
+        return portfolios.stream()
+                .flatMap(p -> p.getPositions() == null ? java.util.stream.Stream.empty() : p.getPositions().stream())
+                .filter(p -> p.getQuantity() != null && p.getQuantity().signum() > 0)
+                .filter(p -> rule.getScope() != AlertRule.Scope.ASSET || rule.getSymbol().equals(p.getSymbol()))
+                .toList();
+    }
+
     private static String since(AlertRule.Period period) {
         return switch (period) {
             case DAY -> "depuis la veille";
             case WEEK -> "sur 7 jours";
             case MONTH -> "sur 30 jours";
+            case YEAR -> "sur 1 an";
         };
     }
 

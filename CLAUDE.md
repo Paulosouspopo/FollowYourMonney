@@ -163,20 +163,48 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
 
 ## Notifications (`notification/`)
 - `NotificationService.notify` : point d'entrée unique ; toujours dans la
-  boîte de réception (`notifications`), + email si demandé. (Push à venir.)
-- `AlertRule` : périmètre GLOBAL / PORTFOLIO / ASSET (actif détenu ou non),
-  condition RISES / FALLS / MOVES (% sur DAY/WEEK/MONTH) ou ABOVE / BELOW (EUR).
+  boîte de réception (`notifications`), + email si demandé, + push (après
+  commit) sauf si l'utilisateur l'a coupé ou pendant ses heures calmes
+  (`NotificationPreferences`, plage pouvant passer minuit).
+- **Web Push** (`notification/push`) : chiffrement RFC 8291 (aes128gcm) et
+  VAPID RFC 8292 codés avec la JDK seule (`WebPushCrypto`, testé sur le
+  vecteur de la RFC). Clés VAPID : `app.push.vapid-*` (à fixer en prod),
+  sinon générées et gardées en base (`app_secrets`). `PushService` supprime
+  un abonnement refusé en 404/410. API : `/api/push/public-key`,
+  `/api/push/subscriptions`, `/api/push/unsubscribe`, `/api/push/test`,
+  `/api/notification-preferences`.
+- `AlertRule` : périmètre GLOBAL / PORTFOLIO / ASSET (actif détenu ou non) ;
+  conditions RISES / FALLS / MOVES (% sur DAY/WEEK/MONTH), ABOVE / BELOW
+  (EUR), PROFIT_ABOVE / LOSS_BELOW (plus-value latente / prix de revient des
+  positions), NEW_HIGH / NEW_LOW (actif seulement, clôtures WEEK/MONTH/YEAR,
+  seuil 0), WEIGHT_ABOVE (actif ou portefeuille, % du patrimoine). Nom libre
+  (`label` = titre de la notification), canaux push/email, sourdine
+  (`mutedUntil`, `POST /api/alert-rules/{id}/mute`).
 - `AlertEvaluator` : appelé par `MarketDataJobs` juste après la mise à jour
   horaire des cours. Portefeuille/patrimoine : variation de PLUS-VALUE
   rapportée à la valeur de départ (snapshot) → un versement/achat ne
   déclenche rien. Actif : cours EUR vs clôture passée. Anti-répétition :
   désarmée après déclenchement, réarmée quand la condition retombe (ou
-  chaque nouveau jour pour une variation sur 1 jour).
+  chaque nouveau jour pour une variation sur 1 jour ou un record).
+- `PlanExecutor.runDuePlans` prévient aussi d'un NOUVEAU problème de plan
+  (`lastError` changé), pas à chaque nouvel essai.
 - `ReportService` : rapport DAILY / WEEKLY (lundi) à l'heure choisie
   (Europe/Paris, `TimeZones`), job à hh:15 ; aperçu via
   `/api/report-settings/preview`.
 - `PlanExecutor.runDuePlans` notifie les échéances exécutées par le job.
 - Purge des notifications de plus de 180 jours.
+
+## Actifs suivis et fiche d'un actif (`watchlist/`)
+- `WatchlistItem` : symbole Yahoo suivi par un utilisateur, détenu ou non
+  (100 max). Ajout = cotation vérifiée + 1 an d'historique téléchargé.
+- La cotation horaire (`AssetPriceService.updateAllAssetPrices`) couvre les
+  symboles détenus, suivis ET visés par une alerte active.
+- `GET /api/watchlist` lit la base (dernier cours, variation vs clôture
+  précédente, 30 jours pour la mini-courbe, quantité détenue, alertes) :
+  pas d'appel réseau. `GET /api/market/detail?symbol=` (cotation live,
+  plus bas/haut 1 an via `MarketPriceLookup.closingRange`, lignes détenues,
+  alertes) et `GET /api/market/history?symbol=&range=1M|3M|6M|1Y|5Y`.
+  Symbole en paramètre de requête (`^FCHI`, `EURUSD=X`).
 
 ## Dev local : antivirus Avast
 - Avast (« Web/Mail Shield », analyse HTTPS) re-signe tout le trafic HTTPS :

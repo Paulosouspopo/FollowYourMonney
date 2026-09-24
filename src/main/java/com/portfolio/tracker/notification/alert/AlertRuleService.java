@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -23,6 +24,7 @@ public class AlertRuleService {
 
     /** Au-delà, une variation n'a plus de sens (et trahit une saisie en € au lieu de %). */
     private static final BigDecimal MAX_PERCENT = new BigDecimal("1000");
+    private static final BigDecimal HUNDRED = new BigDecimal("100");
     private static final int MAX_RULES_PER_USER = 50;
 
     private final AlertRuleRepository repository;
@@ -57,7 +59,22 @@ public class AlertRuleService {
         repository.delete(owned(id, userId));
     }
 
+    /** Sourdine rapide depuis la liste (null = réactiver). */
+    @Transactional
+    public AlertRuleResponse mute(UUID id, LocalDateTime until, UUID userId) {
+        AlertRule rule = owned(id, userId);
+        rule.setMutedUntil(until);
+        return toResponse(rule);
+    }
+
     private void apply(AlertRule rule, AlertRuleRequest r, UUID userId) {
+        AlertRule.Condition c = r.condition();
+        if (c.isExtreme() && r.scope() != AlertRule.Scope.ASSET) {
+            throw new BadRequestException("Plus haut / plus bas : uniquement sur un actif");
+        }
+        if (c == AlertRule.Condition.WEIGHT_ABOVE && r.scope() == AlertRule.Scope.GLOBAL) {
+            throw new BadRequestException("Poids : choisis un actif ou un portefeuille");
+        }
         rule.setScope(r.scope());
         rule.setPortfolio(null);
         rule.setSymbol(null);
@@ -84,16 +101,29 @@ public class AlertRuleService {
                 // rien à préciser
             }
         }
-        rule.setCondition(r.condition());
-        rule.setThreshold(r.threshold());
-        if (r.condition().isPercentage()) {
-            if (r.threshold().compareTo(MAX_PERCENT) > 0) {
-                throw new BadRequestException("Variation trop grande : le seuil est en %");
+        rule.setCondition(c);
+        if (c.hasThreshold()) {
+            if (r.threshold() == null || r.threshold().signum() <= 0) {
+                throw new BadRequestException("Le seuil doit être strictement positif");
             }
+            BigDecimal max = c == AlertRule.Condition.WEIGHT_ABOVE ? HUNDRED : MAX_PERCENT;
+            if (c.isPercentage() && r.threshold().compareTo(max) > 0) {
+                throw new BadRequestException("Seuil trop grand : il est en % (maximum " + max.toPlainString() + ")");
+            }
+            rule.setThreshold(r.threshold());
+        } else {
+            rule.setThreshold(BigDecimal.ZERO);
+        }
+        if (c.isVariation()) {
             rule.setPeriod(r.period() != null ? r.period() : AlertRule.Period.DAY);
+        } else if (c.isExtreme()) {
+            rule.setPeriod(r.period() != null && r.period() != AlertRule.Period.DAY ? r.period() : AlertRule.Period.YEAR);
         } else {
             rule.setPeriod(null);
         }
+        rule.setLabel(r.label() != null && !r.label().isBlank() ? r.label().trim() : null);
+        rule.setNotifyPush(!Boolean.FALSE.equals(r.notifyPush()));
+        rule.setMutedUntil(r.mutedUntil());
         rule.setNotifyEmail(r.notifyEmail());
         rule.setEnabled(!Boolean.FALSE.equals(r.enabled()));
     }
@@ -115,7 +145,10 @@ public class AlertRuleService {
                 r.getThreshold(),
                 r.getPeriod(),
                 r.isNotifyEmail(),
+                r.isNotifyPush(),
                 r.isEnabled(),
+                r.getLabel(),
+                r.getMutedUntil(),
                 r.getLastTriggeredAt(),
                 AlertRuleDescriber.describe(r));
     }

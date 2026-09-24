@@ -19,6 +19,19 @@ public final class Formats {
         return normalizeSpaces(f.format(amount.setScale(2, RoundingMode.HALF_UP)));
     }
 
+    /** « 184,20 $US » : cours dans la devise de cotation (EUR si inconnue). */
+    public static String money(BigDecimal amount, String currency) {
+        NumberFormat f = NumberFormat.getCurrencyInstance(FR);
+        try {
+            f.setCurrency(java.util.Currency.getInstance(currency != null ? currency : "EUR"));
+        } catch (IllegalArgumentException e) {
+            return eur(amount);
+        }
+        int digits = amount.abs().compareTo(BigDecimal.ONE) < 0 ? 6 : 2;
+        f.setMaximumFractionDigits(digits);
+        return normalizeSpaces(f.format(amount.setScale(digits, RoundingMode.HALF_UP)));
+    }
+
     /** « +312,40 € » / « −312,40 € » */
     public static String signedEur(BigDecimal amount) {
         return sign(amount) + eur(amount.abs());

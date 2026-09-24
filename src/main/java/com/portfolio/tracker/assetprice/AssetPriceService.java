@@ -4,6 +4,8 @@ import com.portfolio.tracker.asset.Asset;
 import com.portfolio.tracker.asset.AssetRepository;
 import com.portfolio.tracker.marketdata.MarketDataProvider;
 import com.portfolio.tracker.marketdata.MarketQuote;
+import com.portfolio.tracker.notification.alert.AlertRuleRepository;
+import com.portfolio.tracker.watchlist.WatchlistRepository;
 
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -11,7 +13,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.Map;
 import java.util.Optional;
 
@@ -30,13 +34,17 @@ public class AssetPriceService {
     private final AssetRepository assetRepository;
     private final MarketDataProvider marketDataProvider;
     private final PriceHistoryService priceHistoryService;
+    private final WatchlistRepository watchlistRepository;
+    private final AlertRuleRepository alertRuleRepository;
 
-    /** Rafraîchit la cotation du jour de tous les symboles détenus. */
+    /** Rafraîchit la cotation du jour des symboles détenus, suivis ou surveillés par une alerte. */
     public void updateAllAssetPrices() {
         log.info("========== Starting asset price update ==========");
 
         try {
-            List<String> distinctSymbols = assetRepository.findAllDistinctSymbols();
+            Set<String> distinctSymbols = new LinkedHashSet<>(assetRepository.findAllDistinctSymbols());
+            distinctSymbols.addAll(watchlistRepository.findAllDistinctSymbols());
+            distinctSymbols.addAll(alertRuleRepository.findDistinctAssetSymbols());
 
             if (distinctSymbols.isEmpty()) {
                 log.info("No assets found to update");
@@ -68,11 +76,8 @@ public class AssetPriceService {
             return false;
         }
 
+        // Vide pour un actif seulement suivi (watchlist, alerte) : la cotation est quand même enregistrée
         List<Asset> assets = assetRepository.findAllBySymbol(symbol);
-        if (assets.isEmpty()) {
-            log.warn("No asset found for symbol: {}", symbol);
-            return false;
-        }
 
         Optional<MarketQuote> quote = marketDataProvider.getQuote(symbol);
         if (quote.isEmpty()) {
