@@ -12,10 +12,11 @@ import java.util.Optional;
 public interface MarketDataProvider {
     Optional<MarketQuote> getQuote(String symbol);
 
-    List<MarketPricePoint> getDailyHistory(String symbol, String range);
-
     /**
-     * Historique borné précisément, pour combler un trou sans tout retélécharger.
+     * Clôtures journalières sur [from, to] (bornes incluses).
+     *
+     * @return liste vide si le provider n'a aucune donnée sur la période
+     * @throws MarketDataUnavailableException si le provider est injoignable
      */
     List<MarketPricePoint> getDailyHistory(String symbol, LocalDate from, LocalDate to);
 

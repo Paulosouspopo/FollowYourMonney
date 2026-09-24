@@ -3,6 +3,7 @@ package com.portfolio.tracker.marketdata.yahoo;
 import com.portfolio.tracker.asset.AssetType;
 import com.portfolio.tracker.marketdata.AssetSearchResult;
 import com.portfolio.tracker.marketdata.MarketDataProvider;
+import com.portfolio.tracker.marketdata.MarketDataUnavailableException;
 import com.portfolio.tracker.marketdata.MarketPricePoint;
 import com.portfolio.tracker.marketdata.MarketQuote;
 import com.portfolio.tracker.marketdata.yahoo.dto.YahooChartResponse;
@@ -14,6 +15,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.DateTimeException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -21,14 +24,24 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 @Component
 @Slf4j
 public class YahooFinanceClient implements MarketDataProvider {
 
-    private static final Set<String> ALLOWED_RANGES = Set.of("1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "max");
+    /**
+     * Yahoo cote certaines places en sous-unités (pence, cents...). On ramène
+     * tout à la devise ISO principale pour que les conversions EUR restent
+     * justes (sinon un titre londonien vaut 100x trop).
+     */
+    private static final Map<String, String> MINOR_UNITS = Map.of(
+            "GBp", "GBP",
+            "GBX", "GBP",
+            "ZAc", "ZAR",
+            "ILA", "ILS");
+    private static final BigDecimal MINOR_UNIT_DIVISOR = BigDecimal.valueOf(100);
 
     private final RestClient restClient;
 
@@ -59,20 +72,27 @@ public class YahooFinanceClient implements MarketDataProvider {
     // ---------------------------------------------------------------- history
 
     @Override
-    public List<MarketPricePoint> getDailyHistory(String symbol, String range) {
-        if (!ALLOWED_RANGES.contains(range)) {
-            throw new IllegalArgumentException("Range Yahoo invalide : " + range);
-        }
+    public List<MarketPricePoint> getDailyHistory(String symbol, LocalDate from, LocalDate to) {
+        long period1 = from.atStartOfDay(ZoneOffset.UTC).toEpochSecond();
+        long period2 = to.plusDays(1).atStartOfDay(ZoneOffset.UTC).toEpochSecond();
+        YahooChartResponse response;
         try {
-            YahooChartResponse response = restClient.get()
-                    .uri("/v8/finance/chart/{symbol}?range={range}&interval=1d", symbol, range)
+            response = restClient.get()
+                    .uri("/v8/finance/chart/{symbol}?period1={p1}&period2={p2}&interval=1d",
+                            symbol, period1, period2)
                     .retrieve()
                     .body(YahooChartResponse.class);
-            return firstResult(symbol, response).map(this::toPricePoints).orElse(List.of());
         } catch (Exception e) {
-            log.error("Yahoo history failed for {} ({}): {}", symbol, range, e.getMessage());
-            return List.of();
+            throw new MarketDataUnavailableException(
+                    "Yahoo history failed for " + symbol + " [" + from + "," + to + "]: " + e.getMessage(), e);
         }
+        return firstResult(symbol, response)
+                .map(this::toPricePoints)
+                .orElse(List.of())
+                .stream()
+                // Yahoo renvoie parfois la barre du jour en cours hors période demandée
+                .filter(p -> !p.date().isBefore(from) && !p.date().isAfter(to))
+                .toList();
     }
 
     // ----------------------------------------------------------------- search
@@ -120,11 +140,17 @@ public class YahooFinanceClient implements MarketDataProvider {
         if (meta == null || meta.regularMarketPrice() == null)
             return Optional.empty();
 
+        ZoneId zone = exchangeZone(meta);
+        LocalDate marketDate = meta.regularMarketTime() != null
+                ? Instant.ofEpochSecond(meta.regularMarketTime()).atZone(zone).toLocalDate()
+                : LocalDate.now(zone);
+
         return Optional.of(new MarketQuote(
                 meta.symbol(),
-                BigDecimal.valueOf(meta.regularMarketPrice()),
-                meta.currency(),
+                normalizePrice(BigDecimal.valueOf(meta.regularMarketPrice()), meta.currency()),
+                normalizeCurrency(meta.currency()),
                 LocalDateTime.now(),
+                marketDate,
                 firstNonBlank(meta.longName(), meta.shortName()),
                 meta.fullExchangeName(),
                 meta.instrumentType()));
@@ -141,16 +167,48 @@ public class YahooFinanceClient implements MarketDataProvider {
         if (closes == null)
             return List.of();
 
+        ZoneId zone = exchangeZone(meta);
+        String currency = normalizeCurrency(meta.currency());
+
         List<MarketPricePoint> points = new ArrayList<>(timestamps.size());
         for (int i = 0; i < Math.min(timestamps.size(), closes.size()); i++) {
             Double close = closes.get(i);
             if (close == null)
                 continue; // jour férié / donnée manquante
-            LocalDateTime asOf = LocalDateTime.ofInstant(
-                    Instant.ofEpochSecond(timestamps.get(i)), ZoneId.systemDefault());
-            points.add(new MarketPricePoint(meta.symbol(), BigDecimal.valueOf(close), meta.currency(), asOf));
+            Instant instant = Instant.ofEpochSecond(timestamps.get(i));
+            points.add(new MarketPricePoint(
+                    meta.symbol(),
+                    normalizePrice(BigDecimal.valueOf(close), meta.currency()),
+                    currency,
+                    instant.atZone(zone).toLocalDate(),
+                    LocalDateTime.ofInstant(instant, ZoneId.systemDefault())));
         }
         return points;
+    }
+
+    /**
+     * Fuseau de la place de cotation : c'est lui qui définit le "jour" d'une
+     * clôture (une barre Tokyo horodatée 00:00 UTC appartient au jour J à Tokyo).
+     */
+    private static ZoneId exchangeZone(YahooChartResponse.Meta meta) {
+        if (meta.exchangeTimezoneName() != null) {
+            try {
+                return ZoneId.of(meta.exchangeTimezoneName());
+            } catch (DateTimeException e) {
+                log.debug("Fuseau Yahoo inconnu : {}", meta.exchangeTimezoneName());
+            }
+        }
+        return ZoneId.systemDefault();
+    }
+
+    private static String normalizeCurrency(String currency) {
+        return currency == null ? null : MINOR_UNITS.getOrDefault(currency, currency);
+    }
+
+    private static BigDecimal normalizePrice(BigDecimal price, String rawCurrency) {
+        return rawCurrency != null && MINOR_UNITS.containsKey(rawCurrency)
+                ? price.divide(MINOR_UNIT_DIVISOR, 8, RoundingMode.HALF_UP)
+                : price;
     }
 
     /**
@@ -172,22 +230,5 @@ public class YahooFinanceClient implements MarketDataProvider {
             if (v != null && !v.isBlank())
                 return v;
         return null;
-    }
-
-    @Override
-    public List<MarketPricePoint> getDailyHistory(String symbol, LocalDate from, LocalDate to) {
-        long period1 = from.atStartOfDay(ZoneOffset.UTC).toEpochSecond();
-        long period2 = to.plusDays(1).atStartOfDay(ZoneOffset.UTC).toEpochSecond();
-        try {
-            YahooChartResponse response = restClient.get()
-                    .uri("/v8/finance/chart/{symbol}?period1={p1}&period2={p2}&interval=1d",
-                            symbol, period1, period2)
-                    .retrieve()
-                    .body(YahooChartResponse.class);
-            return firstResult(symbol, response).map(this::toPricePoints).orElse(List.of());
-        } catch (Exception e) {
-            log.error("Yahoo bounded history failed for {} [{},{}]: {}", symbol, from, to, e.getMessage());
-            return List.of();
-        }
     }
 }

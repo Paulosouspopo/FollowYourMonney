@@ -1,6 +1,7 @@
 package com.portfolio.tracker.snapshot;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -13,23 +14,7 @@ import java.util.UUID;
 @Repository
 public interface PortfolioSnapshotRepository extends JpaRepository<PortfolioSnapshot, UUID> {
 
-  @Query("""
-      SELECT s FROM PortfolioSnapshot s
-      WHERE s.portfolio.user.id = :userId
-        AND s.snapshotDate >= :from
-      ORDER BY s.snapshotDate ASC
-      """)
-  List<PortfolioSnapshot> findByUserIdSince(@Param("userId") UUID userId,
-      @Param("from") LocalDate from);
-
-  @Query("""
-      SELECT s FROM PortfolioSnapshot s
-      WHERE s.portfolio.id = :portfolioId
-        AND s.snapshotDate >= :from
-      ORDER BY s.snapshotDate ASC
-      """)
-  List<PortfolioSnapshot> findByPortfolioSince(@Param("portfolioId") UUID portfolioId,
-      @Param("from") LocalDate from);
+  // ----------------------------------------------------------- courbe (lecture)
 
   List<PortfolioSnapshot> findByPortfolioIdAndSnapshotDateGreaterThanEqualOrderBySnapshotDateAsc(
       UUID portfolioId, LocalDate startDate);
@@ -52,21 +37,26 @@ public interface PortfolioSnapshotRepository extends JpaRepository<PortfolioSnap
       """)
   List<PortfolioSnapshot> findAllByUserIdOrderBySnapshotDateAsc(@Param("userId") UUID userId);
 
-  @Query("""
-      SELECT s FROM PortfolioSnapshot s
-      WHERE s.portfolio.user.id = :userId
-      ORDER BY s.snapshotDate ASC
-      """)
-  List<PortfolioSnapshot> findAllByUserId(@Param("userId") UUID userId);
+  @Query("SELECT MAX(s.snapshotDate) FROM PortfolioSnapshot s WHERE s.portfolio.id = :portfolioId")
+  Optional<LocalDate> findLastSnapshotDate(@Param("portfolioId") UUID portfolioId);
 
-  Optional<PortfolioSnapshot> findByPortfolioIdAndSnapshotDate(UUID portfolioId, LocalDate snapshotDate);
+  // ---------------------------------------------------------- reconstruction
 
+  @Modifying(flushAutomatically = true)
+  @Query("DELETE FROM PortfolioSnapshot s WHERE s.portfolio.id = :portfolioId")
+  int deleteByPortfolioId(@Param("portfolioId") UUID portfolioId);
+
+  /**
+   * Supprime la plage à recalculer [from, +∞[ ainsi que tout snapshot antérieur
+   * à la première transaction (cas d'une transaction déplacée ou supprimée).
+   */
+  @Modifying(flushAutomatically = true)
   @Query("""
-      SELECT s FROM PortfolioSnapshot s
-      WHERE s.portfolio.user.id = :userId
-        AND s.snapshotDate >= :from
-      ORDER BY s.snapshotDate ASC
+      DELETE FROM PortfolioSnapshot s
+      WHERE s.portfolio.id = :portfolioId
+        AND (s.snapshotDate < :firstDay OR s.snapshotDate >= :from)
       """)
-  List<PortfolioSnapshot> findAllByUserIdSince(@Param("userId") UUID userId,
+  int deleteForRebuild(@Param("portfolioId") UUID portfolioId,
+      @Param("firstDay") LocalDate firstDay,
       @Param("from") LocalDate from);
 }

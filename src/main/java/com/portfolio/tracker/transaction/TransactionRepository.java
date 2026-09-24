@@ -60,6 +60,18 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
                         """)
         List<Transaction> findRecentByUserId(@Param("userId") UUID userId, Pageable pageable);
 
+        /**
+         * Toutes les transactions d'un portefeuille, asset hydraté, dans l'ordre
+         * chronologique : entrée unique de la reconstruction de l'historique.
+         */
+        @Query("""
+                        SELECT t FROM Transaction t
+                        JOIN FETCH t.asset a
+                        WHERE a.portfolio.id = :portfolioId
+                        ORDER BY t.transactionDate ASC, t.createdAt ASC
+                        """)
+        List<Transaction> findAllByPortfolioIdForHistory(@Param("portfolioId") UUID portfolioId);
+
         /** Date de la première opération : point de départ d'un backfill. */
         @Query("""
                         SELECT MIN(t.transactionDate) FROM Transaction t

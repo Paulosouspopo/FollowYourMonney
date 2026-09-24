@@ -6,7 +6,9 @@ import com.portfolio.tracker.shared.exception.ResourceNotFoundException;
 import com.portfolio.tracker.asset.dto.AssetCreateRequest;
 import com.portfolio.tracker.asset.dto.AssetResponse;
 import com.portfolio.tracker.asset.dto.AssetUpdateRequest;
+import com.portfolio.tracker.snapshot.PortfolioHistoryChangedEvent;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,6 +23,7 @@ public class AssetService {
     private final AssetRepository assetRepository;
     private final PortfolioRepository portfolioRepository;
     private final AssetMapper assetMapper;
+    private final ApplicationEventPublisher eventPublisher;
 
     public List<AssetResponse> findByPortfolioIdAndUserId(UUID portfolioId, UUID userId) {
         if (!portfolioRepository.findByIdAndUserId(portfolioId, userId).isPresent()) {
@@ -70,6 +73,8 @@ public class AssetService {
         Asset asset = assetRepository.findByIdAndUserId(assetId, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Asset non accessible"));
 
-        assetRepository.delete(asset);
+        assetRepository.delete(asset); // cascade sur ses transactions
+
+        eventPublisher.publishEvent(PortfolioHistoryChangedEvent.full(asset.getPortfolio().getId()));
     }
 }

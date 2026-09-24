@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -28,7 +29,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("Backfill — cohérence de la courbe d'historique")
 class BackfillCoherenceTest extends AbstractIntegrationTest {
 
-    @Autowired private BackfillService backfillService;
+    @Autowired private PortfolioHistoryService historyService;
     @Autowired private PortfolioSnapshotRepository snapshotRepository;
     @Autowired private TransactionRepository transactionRepository;
     @Autowired private AssetPriceRepository assetPriceRepository;
@@ -37,10 +38,12 @@ class BackfillCoherenceTest extends AbstractIntegrationTest {
     @Autowired private UserRepository userRepository;
 
     private UUID userId;
+    private UUID portfolioId;
 
     @BeforeEach
     void seed() {
         snapshotRepository.deleteAll();
+        assetPriceRepository.deleteAll();
         User user = userRepository.save(User.builder()
                 .email("backfill-" + UUID.randomUUID() + "@fym.io")
                 .username("test-" + UUID.randomUUID())
@@ -50,6 +53,7 @@ class BackfillCoherenceTest extends AbstractIntegrationTest {
 
         Portfolio portfolio = portfolioRepository.save(
                 Portfolio.builder().name("PEA").type(PortfolioType.PEA).user(user).build());
+        portfolioId = portfolio.getId();
 
         Asset btc = assetRepository.save(Asset.builder()
                 .symbol("BTC-USD").name("Bitcoin").portfolio(portfolio).build());
@@ -87,9 +91,9 @@ class BackfillCoherenceTest extends AbstractIntegrationTest {
     @Test
     @DisplayName("Aucun snapshot ne vaut 0 alors qu'une position est détenue")
     void aucunFauxDecrochage() {
-        backfillService.backfillForUser(userId, 30);
+        historyService.rebuild(portfolioId, LocalDate.now().minusDays(30));
 
-        List<PortfolioSnapshot> snapshots = snapshotRepository.findAllByUserId(userId);
+        List<PortfolioSnapshot> snapshots = snapshotRepository.findAllByUserIdOrderBySnapshotDateAsc(userId);
 
         assertThat(snapshots).isNotEmpty();
         assertThat(snapshots)
@@ -100,9 +104,9 @@ class BackfillCoherenceTest extends AbstractIntegrationTest {
     @Test
     @DisplayName("Les dates sans prix reprennent le dernier prix connu, pas 0")
     void reportDuDernierPrixConnu() {
-        backfillService.backfillForUser(userId, 30);
+        historyService.rebuild(portfolioId, LocalDate.now().minusDays(30));
 
-        List<PortfolioSnapshot> snapshots = snapshotRepository.findAllByUserId(userId);
+        List<PortfolioSnapshot> snapshots = snapshotRepository.findAllByUserIdOrderBySnapshotDateAsc(userId);
 
         // Entre J-20 et J-11, le seul prix connu est 35 000 : il doit être reporté
         assertThat(snapshots)
@@ -118,9 +122,9 @@ class BackfillCoherenceTest extends AbstractIntegrationTest {
     @Test
     @DisplayName("Aucun snapshot antérieur à la première transaction")
     void pasDeSnapshotAvantLaPremiereTransaction() {
-        backfillService.backfillForUser(userId, 90);
+        historyService.rebuild(portfolioId, LocalDate.now().minusDays(90));
 
-        assertThat(snapshotRepository.findAllByUserId(userId))
+        assertThat(snapshotRepository.findAllByUserIdOrderBySnapshotDateAsc(userId))
                 .allSatisfy(s -> assertThat(s.getSnapshotDate())
                         .isAfterOrEqualTo(java.time.LocalDate.now().minusDays(30)));
     }
@@ -128,11 +132,11 @@ class BackfillCoherenceTest extends AbstractIntegrationTest {
     @Test
     @DisplayName("Idempotence : relancer le backfill ne duplique pas les snapshots")
     void idempotence() {
-        backfillService.backfillForUser(userId, 30);
-        int apresPremierPassage = snapshotRepository.findAllByUserId(userId).size();
+        historyService.rebuild(portfolioId, LocalDate.now().minusDays(30));
+        int apresPremierPassage = snapshotRepository.findAllByUserIdOrderBySnapshotDateAsc(userId).size();
 
-        backfillService.backfillForUser(userId, 30);
-        int apresSecondPassage = snapshotRepository.findAllByUserId(userId).size();
+        historyService.rebuild(portfolioId, LocalDate.now().minusDays(30));
+        int apresSecondPassage = snapshotRepository.findAllByUserIdOrderBySnapshotDateAsc(userId).size();
 
         assertThat(apresSecondPassage).isEqualTo(apresPremierPassage);
     }
@@ -140,9 +144,9 @@ class BackfillCoherenceTest extends AbstractIntegrationTest {
     @Test
     @DisplayName("La courbe est strictement croissante en dates, sans doublon")
     void courbeSansDoublonDeDate() {
-        backfillService.backfillForUser(userId, 30);
+        historyService.rebuild(portfolioId, LocalDate.now().minusDays(30));
 
-        List<PortfolioSnapshot> snapshots = snapshotRepository.findAllByUserId(userId);
+        List<PortfolioSnapshot> snapshots = snapshotRepository.findAllByUserIdOrderBySnapshotDateAsc(userId);
 
         assertThat(snapshots)
                 .extracting(PortfolioSnapshot::getSnapshotDate)

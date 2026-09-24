@@ -23,7 +23,7 @@ public class YahooExchangeRateProvider implements ExchangeRateProvider {
         if (fromCurrency.equalsIgnoreCase(toCurrency)) {
             return Optional.of(BigDecimal.ONE);
         }
-        String symbol = fromCurrency.toUpperCase() + toCurrency.toUpperCase() + "=X";
+        String symbol = FxSymbols.pair(fromCurrency, toCurrency);
         return marketDataProvider.getQuote(symbol).map(MarketQuote::price);
     }
 }

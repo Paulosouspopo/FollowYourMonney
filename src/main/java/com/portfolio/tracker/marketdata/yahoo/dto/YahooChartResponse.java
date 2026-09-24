@@ -23,7 +23,9 @@ public record YahooChartResponse(Chart chart) {
             String longName,
             String shortName,
             String fullExchangeName,
-            String instrumentType) {
+            String instrumentType,
+            Long regularMarketTime,
+            String exchangeTimezoneName) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

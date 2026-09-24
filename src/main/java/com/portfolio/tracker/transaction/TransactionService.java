@@ -3,7 +3,7 @@ package com.portfolio.tracker.transaction;
 import com.portfolio.tracker.asset.Asset;
 import com.portfolio.tracker.asset.AssetRepository;
 import com.portfolio.tracker.asset.AssetType;
-import com.portfolio.tracker.assetprice.AssetPriceService;
+import com.portfolio.tracker.assetprice.PriceHistoryService;
 import com.portfolio.tracker.exchangerate.ExchangeRateService;
 import com.portfolio.tracker.marketdata.MarketDataProvider;
 import com.portfolio.tracker.marketdata.MarketQuote;
@@ -12,15 +12,18 @@ import com.portfolio.tracker.portfolio.Portfolio;
 import com.portfolio.tracker.portfolio.PortfolioRepository;
 import com.portfolio.tracker.shared.MoneyConstants;
 import com.portfolio.tracker.shared.exception.ResourceNotFoundException;
+import com.portfolio.tracker.snapshot.PortfolioHistoryChangedEvent;
 import com.portfolio.tracker.transaction.dto.TransactionCreateRequest;
 import com.portfolio.tracker.transaction.dto.TransactionResponse;
 import com.portfolio.tracker.transaction.dto.TransactionUpdateRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -35,9 +38,10 @@ public class TransactionService {
         private final AssetRepository assetRepository;
         private final PortfolioRepository portfolioRepository;
         private final MarketDataProvider marketDataProvider;
-        private final AssetPriceService assetPriceService;
+        private final PriceHistoryService priceHistoryService;
         private final ExchangeRateService exchangeRateService;
         private final TransactionMapper transactionMapper;
+        private final ApplicationEventPublisher eventPublisher;
 
         // ---------------------------------------------------------------- lectures
 
@@ -81,8 +85,14 @@ public class TransactionService {
                                 .multiply(request.pricePerUnit())
                                 .setScale(MoneyConstants.MONEY_SCALE, MoneyConstants.ROUNDING);
 
-                // Taux figé au moment de l'opération : c'est la vérité historique
-                BigDecimal rateToEur = exchangeRateService.getRate(currency, MoneyConstants.BASE_CURRENCY);
+                LocalDateTime transactionDate = request.transactionDate() != null
+                                ? request.transactionDate()
+                                : LocalDateTime.now();
+
+                // Taux du JOUR DE L'OPÉRATION (et non du jour de saisie) : c'est la
+                // vérité historique, figée sur la transaction.
+                BigDecimal rateToEur = exchangeRateService.getRateAsOf(
+                                currency, MoneyConstants.BASE_CURRENCY, transactionDate.toLocalDate());
 
                 Transaction transaction = Transaction.builder()
                                 .asset(asset)
@@ -95,9 +105,7 @@ public class TransactionService {
                                 .exchangeRateToEur(rateToEur)
                                 .totalAmountEur(toEur(totalAmount, rateToEur))
                                 .feesEur(toEur(fees, rateToEur))
-                                .transactionDate(request.transactionDate() != null
-                                                ? request.transactionDate()
-                                                : LocalDateTime.now())
+                                .transactionDate(transactionDate)
                                 .notes(request.notes())
                                 .build();
 
@@ -106,7 +114,9 @@ public class TransactionService {
                                 saved.getId(), saved.getType(), saved.getQuantity(),
                                 asset.getSymbol(), saved.getPricePerUnit(), currency, rateToEur);
 
-                assetPriceService.ensurePriceHistory(asset.getSymbol(), saved.getTransactionDate());
+                // Historique de prix + snapshots recalculés après commit
+                eventPublisher.publishEvent(new PortfolioHistoryChangedEvent(
+                                portfolioId, saved.getTransactionDate().toLocalDate()));
 
                 return transactionMapper.toResponse(saved);
         }
@@ -132,6 +142,9 @@ public class TransactionService {
                                 .portfolio(portfolio)
                                 .build();
                 log.debug("Création Asset {} ({}) pour le portefeuille {}", asset.getSymbol(), type, portfolio.getId());
+                // La cotation vient d'être récupérée : on la garde pour que le
+                // dashboard ait un prix immédiatement.
+                priceHistoryService.saveQuote(quote.symbol(), quote);
                 return assetRepository.save(asset);
         }
 
@@ -150,23 +163,37 @@ public class TransactionService {
                                 .multiply(request.pricePerUnit())
                                 .setScale(MoneyConstants.MONEY_SCALE, MoneyConstants.ROUNDING);
 
+                LocalDateTime previousDate = existing.getTransactionDate();
+                LocalDateTime newDate = request.transactionDate() != null
+                                ? request.transactionDate()
+                                : previousDate;
+
                 existing.setType(request.type());
                 existing.setQuantity(request.quantity());
                 existing.setPricePerUnit(request.pricePerUnit());
                 existing.setFees(fees);
                 existing.setTotalAmount(totalAmount);
-                existing.setTransactionDate(request.transactionDate() != null
-                                ? request.transactionDate()
-                                : existing.getTransactionDate());
+                existing.setTransactionDate(newDate);
                 existing.setNotes(request.notes());
 
-                // On réutilise le taux d'origine : la devise n'est pas modifiable,
-                // l'historique reste donc fidèle au jour de l'opération.
-                BigDecimal rateToEur = existing.getExchangeRateToEur();
+                // La devise n'est pas modifiable ; le taux ne change que si
+                // l'opération est déplacée à un autre jour.
+                BigDecimal rateToEur = newDate.toLocalDate().equals(previousDate.toLocalDate())
+                                ? existing.getExchangeRateToEur()
+                                : exchangeRateService.getRateAsOf(existing.getCurrency(),
+                                                MoneyConstants.BASE_CURRENCY, newDate.toLocalDate());
+                existing.setExchangeRateToEur(rateToEur);
                 existing.setTotalAmountEur(toEur(totalAmount, rateToEur));
                 existing.setFeesEur(toEur(fees, rateToEur));
 
-                return transactionMapper.toResponse(transactionRepository.save(existing));
+                Transaction saved = transactionRepository.save(existing);
+
+                // Recalcul depuis la plus ancienne des deux dates
+                LocalDate from = previousDate.isBefore(newDate) ? previousDate.toLocalDate() : newDate.toLocalDate();
+                eventPublisher.publishEvent(new PortfolioHistoryChangedEvent(
+                                saved.getAsset().getPortfolio().getId(), from));
+
+                return transactionMapper.toResponse(saved);
         }
 
         // --------------------------------------------------------------- supression
@@ -176,6 +203,10 @@ public class TransactionService {
                 Transaction transaction = transactionRepository.findByIdAndUserId(transactionId, userId)
                                 .orElseThrow(() -> new ResourceNotFoundException("Transaction non accessible"));
                 transactionRepository.delete(transaction);
+
+                eventPublisher.publishEvent(new PortfolioHistoryChangedEvent(
+                                transaction.getAsset().getPortfolio().getId(),
+                                transaction.getTransactionDate().toLocalDate()));
         }
 
         private void validateBusinessRules(TransactionType type, BigDecimal quantity, BigDecimal pricePerUnit) {

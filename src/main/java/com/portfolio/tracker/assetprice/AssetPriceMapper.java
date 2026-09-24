@@ -14,6 +14,7 @@ public class AssetPriceMapper {
     public AssetPrice toEntity(MarketQuote quote, String source) {
         return AssetPrice.builder()
                 .symbol(quote.symbol())
+                .priceDate(quote.marketDate())
                 .price(quote.price())
                 .currency(quote.currency())
                 .lastUpdated(quote.asOf())

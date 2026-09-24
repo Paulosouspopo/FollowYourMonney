@@ -1,5 +1,7 @@
 package com.portfolio.tracker.exchangerate;
 
+import com.portfolio.tracker.assetprice.PriceHistoryService;
+import com.portfolio.tracker.assetprice.dto.DailyPrice;
 import com.portfolio.tracker.exchangerate.dto.ExchangeRateResponse;
 import com.portfolio.tracker.shared.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
@@ -11,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -26,6 +29,7 @@ public class ExchangeRateService {
     private final ExchangeRateRepository exchangeRateRepository;
     private final ExchangeRateMapper exchangeRateMapper;
     private final ExchangeRateProvider exchangeRateProvider;
+    private final PriceHistoryService priceHistoryService;
 
     @Transactional
     public BigDecimal getRate(String fromCurrency, String toCurrency) {
@@ -57,6 +61,30 @@ public class ExchangeRateService {
 
         saveRate(fromCurrency, toCurrency, fetchedRate, "yahoo-fallback");
         return fetchedRate;
+    }
+
+    /**
+     * Taux {@code from -> to} au jour {@code date} (clôture Yahoo de la paire).
+     *
+     * L'historique des paires est stocké comme n'importe quelle série de marché
+     * (asset_prices, symbole "USDEUR=X"), avec la même couverture incrémentale.
+     * Aujourd'hui, date future ou historique indisponible : taux courant.
+     */
+    public BigDecimal getRateAsOf(String fromCurrency, String toCurrency, LocalDate date) {
+        if (fromCurrency.equalsIgnoreCase(toCurrency)) {
+            return BigDecimal.ONE;
+        }
+        if (date == null || !date.isBefore(LocalDate.now())) {
+            return getRate(fromCurrency, toCurrency);
+        }
+        String pair = FxSymbols.pair(fromCurrency, toCurrency);
+        priceHistoryService.ensureCoverage(pair, date);
+        return priceHistoryService.findOnOrBefore(pair, date)
+                .map(DailyPrice::price)
+                .orElseGet(() -> {
+                    log.warn("Pas d'historique {} au {}, repli sur le taux courant", pair, date);
+                    return getRate(fromCurrency, toCurrency);
+                });
     }
 
     public BigDecimal convert(BigDecimal amount, String fromCurrency, String toCurrency) {

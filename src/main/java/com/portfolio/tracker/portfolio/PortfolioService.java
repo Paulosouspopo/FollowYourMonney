@@ -6,6 +6,7 @@ import com.portfolio.tracker.portfolio.dto.PortfolioResponse;
 import com.portfolio.tracker.portfolio.dto.PortfolioUpdateRequest;
 import com.portfolio.tracker.shared.exception.ResourceAlreadyExistsException;
 import com.portfolio.tracker.shared.exception.ResourceNotFoundException;
+import com.portfolio.tracker.snapshot.PortfolioSnapshotRepository;
 import com.portfolio.tracker.user.User;
 import com.portfolio.tracker.user.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +24,7 @@ public class PortfolioService {
     private final PortfolioRepository portfolioRepository;
     private final UserRepository userRepository;
     private final PortfolioMapper portfolioMapper;
+    private final PortfolioSnapshotRepository snapshotRepository;
 
     public List<PortfolioResponse> findByUserId(UUID userId) {
         return portfolioRepository.findByUserId(userId).stream()
@@ -77,6 +79,8 @@ public class PortfolioService {
         Portfolio portfolio = portfolioRepository.findByIdAndUserId(portfolioId, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Portfolio non accessible"));
 
+        // Les snapshots référencent le portefeuille (FK) sans cascade JPA
+        snapshotRepository.deleteByPortfolioId(portfolioId);
         portfolioRepository.delete(portfolio);
     }
 }

@@ -160,15 +160,8 @@ public class PortfolioValuationService {
     // ---------------------------------------------------------- niveau position
 
     /**
-     * Calcule le CUMP en rejouant les transactions dans l'ordre chronologique.
-     *
-     * Règles :
-     * - BUY : augmente la quantité et le coût total (frais inclus dans le coût,
-     * car ils font partie du prix de revient réel de la position).
-     * - SELL : réduit la quantité proportionnellement au coût moyen courant.
-     * Le gain réalisé = produit net de la vente - coût sorti.
-     * - DIVIDEND : n'affecte ni quantité ni coût, alimente uniquement
-     * dividendsEur.
+     * Calcule le CUMP en rejouant les transactions dans l'ordre chronologique
+     * (règles détaillées dans {@link PositionState}).
      */
     private PositionValuation valuatePosition(List<Transaction> assetTxs,
             Map<String, PriceSnapshot> prices,
@@ -177,55 +170,16 @@ public class PortfolioValuationService {
         assetTxs.sort(Comparator.comparing(Transaction::getTransactionDate));
         Asset asset = assetTxs.get(0).getAsset();
 
-        BigDecimal quantity = BigDecimal.ZERO;
-        BigDecimal costBasisEur = BigDecimal.ZERO; // coût total encore "en jeu"
-        BigDecimal realizedEur = BigDecimal.ZERO;
-        BigDecimal dividendsEur = BigDecimal.ZERO;
-        BigDecimal totalFeesEur = BigDecimal.ZERO;
+        PositionState state = new PositionState();
+        assetTxs.forEach(state::apply);
 
-        for (Transaction tx : assetTxs) {
-            totalFeesEur = totalFeesEur.add(nz(tx.getFeesEur()));
-
-            switch (tx.getType()) {
-                case BUY -> {
-                    BigDecimal txCost = nz(tx.getTotalAmountEur()).add(nz(tx.getFeesEur()));
-                    quantity = quantity.add(tx.getQuantity());
-                    costBasisEur = costBasisEur.add(txCost);
-                }
-                case SELL -> {
-                    BigDecimal sellQty = tx.getQuantity().min(quantity);
-                    if (quantity.signum() > 0 && sellQty.signum() > 0) {
-                        BigDecimal avgCost = costBasisEur.divide(
-                                quantity, MoneyConstants.QUANTITY_SCALE, MoneyConstants.ROUNDING);
-                        BigDecimal costOut = avgCost.multiply(sellQty)
-                                .setScale(MoneyConstants.MONEY_SCALE, MoneyConstants.ROUNDING);
-
-                        // Produit net de la vente = ce qui a été encaissé, frais déduits
-                        BigDecimal proceedsEur = nz(tx.getTotalAmountEur()).subtract(nz(tx.getFeesEur()));
-
-                        realizedEur = realizedEur.add(proceedsEur.subtract(costOut));
-                        costBasisEur = costBasisEur.subtract(costOut);
-                        quantity = quantity.subtract(sellQty);
-                    }
-                    // Si sellQty < tx.getQuantity() : vente à découvert non supportée,
-                    // on borne à la quantité détenue plutôt que de planter.
-                }
-                case DIVIDEND -> dividendsEur = dividendsEur.add(nz(tx.getTotalAmountEur()));
-            }
-        }
-
-        // Résidu d'arrondi : si la position est totalement soldée, le coût
-        // restant doit être nul, pas un epsilon négatif ou positif.
-        if (quantity.signum() == 0) {
-            costBasisEur = BigDecimal.ZERO;
-        }
+        BigDecimal quantity = state.getQuantity();
+        BigDecimal costBasisEur = state.getCostBasisEur();
 
         PriceSnapshot price = prices.getOrDefault(asset.getSymbol(), PriceSnapshot.missing(asset.getSymbol()));
 
         BigDecimal currentValueEur;
-        BigDecimal averageCostEur = quantity.signum() > 0
-                ? costBasisEur.divide(quantity, MoneyConstants.QUANTITY_SCALE, MoneyConstants.ROUNDING)
-                : BigDecimal.ZERO;
+        BigDecimal averageCostEur = state.averageCostEur();
 
         // - Si quantity == 0 : position soldée, pas besoin de prix, donc priceMissing =
         // false
@@ -253,9 +207,9 @@ public class PortfolioValuationService {
                 .currentValueEur(currentValueEur)
                 .unrealizedGainEur(unrealizedEur)
                 .unrealizedGainPercentage(percentage(unrealizedEur, costBasisEur))
-                .realizedGainEur(realizedEur)
-                .dividendsEur(dividendsEur)
-                .totalFeesEur(totalFeesEur)
+                .realizedGainEur(state.getRealizedEur())
+                .dividendsEur(state.getDividendsEur())
+                .totalFeesEur(state.getFeesEur())
                 .lastPrice(price.price())
                 .priceCurrency(price.currency())
                 .priceAsOf(price.asOf())
@@ -288,10 +242,6 @@ public class PortfolioValuationService {
     }
 
     // ------------------------------------------------------------------- utils
-
-    private BigDecimal nz(BigDecimal v) {
-        return v != null ? v : BigDecimal.ZERO;
-    }
 
     private BigDecimal sum(List<PositionValuation> list, Function<PositionValuation, BigDecimal> getter) {
         return list.stream()

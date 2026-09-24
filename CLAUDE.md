@@ -1,0 +1,109 @@
+# FollowYourMonney — Backend
+
+## Contexte général
+Application de suivi de portefeuille d'investissement (actions, crypto, ETF).
+L'utilisateur ajoute manuellement ses transactions (achat/vente/dividende),
+le backend récupère les prix des actifs via Yahoo Finance (API publique non
+officielle) et calcule la valorisation du portefeuille dans le temps.
+
+Objectif produit : une app moderne, claire, avec des graphiques d'évolution,
+des vues par portefeuille/actif/transaction, et à terme des notifications
+(hausse/baisse, bilan journalier).
+
+## Stack
+- Java 21, Spring Boot 3.x
+- PostgreSQL 16 (via Docker, `compose.yml`)
+- JPA/Hibernate — pas de Flyway pour l'instant (env dev, `ddl-auto` update)
+- Lombok
+- Tests : JUnit 5 + Mockito
+
+## Historique des décisions importantes (ne pas revenir en arrière dessus)
+- ❌ **Alpha Vantage et CoinGecko supprimés** → remplacés par **Yahoo Finance**
+  (endpoints non officiels `query1.finance.yahoo.com`, pas de clé API, pas de
+  rate limit connu à ce jour).
+- ❌ **AssetTemplate / AssetExternalService (whitelist figée) supprimés** →
+  remplacés par une **recherche live** via `GET /v1/finance/search?q=...`.
+  L'utilisateur tape un nom, choisit dans les résultats Yahoo, le `symbol`
+  exact retourné (ex: `TTE.PA`, `BTC-EUR`) est stocké tel quel dans `Asset`.
+  Ne jamais laisser l'utilisateur saisir un symbole à la main.
+- **Devise fixe : EUR** comme devise de base pour toute agrégation/dashboard.
+  `totalAmountInBaseCurrency` a été retiré de `Transaction` : on stocke
+  `totalAmount` + `currency` (devise réelle de la transaction), et on
+  convertit à la volée via `ExchangeRateService` uniquement à l'affichage/
+  agrégation.
+- **CUMP (coût unitaire moyen pondéré)** pour le calcul de prix de revient
+  lors des ventes partielles.
+- **Dashboard** : hybride — valorisation "live" calculée à la volée
+  (`PortfolioValuationService`) + **snapshots journaliers stockés**
+  (`PortfolioSnapshot`) pour la courbe d'évolution dans le temps.
+
+## Architecture des entités clés
+- `Asset` : un actif détenu dans un portefeuille précis (ex: BTC dans
+  Portfolio A ET BTC dans Portfolio B = 2 lignes `Asset` distinctes).
+  Le `symbol` doit être le symbole canonique Yahoo (ex: `BTC-EUR`, pas `BTC`).
+- `AssetPrice` : une ligne par `(symbol, price_date)` (contrainte
+  `uk_asset_prices_symbol_price_date`), jour de bourse dans le fuseau de la
+  place. Le jour courant est mis à jour en place (upsert) par le job horaire.
+  Sert aussi aux **paires de devises** (`USDEUR=X`) : l'historique FX est une
+  série de marché comme une autre.
+- `PriceHistoryCoverage` : intervalle de jours déjà DEMANDÉ à Yahoo par
+  symbole (contigu, jusqu'à hier). `PriceHistoryService.ensureCoverage` ne
+  télécharge que ce qui manque.
+- `Transaction` : liée à un `Asset`. Types : BUY, SELL, DIVIDEND. Champs
+  `quantity`, `pricePerUnit`, `fees`, `totalAmount`, `currency`,
+  `transactionDate`.
+- `ExchangeRate` : taux de change entre devises, avec historique
+  (`fromCurrency`, `toCurrency`, `lastUpdated`).
+- `PortfolioSnapshot` : valeur agrégée d'un portefeuille à une date donnée
+  (en EUR), utilisé pour tracer la courbe d'évolution sans tout recalculer
+  à chaque requête. Contrainte unique `(portfolio_id, date)`.
+
+## Flux historique (transaction → prix → snapshots → courbe)
+- `TransactionService` / `AssetService` publient `PortfolioHistoryChangedEvent
+  (portfolioId, from)` ; `PortfolioHistoryListener` regroupe les événements
+  d'une transaction et déclenche `PortfolioHistoryService.refresh` **après
+  commit** (sinon le recalcul, en REQUIRES_NEW, ne voit pas les données).
+- `refresh` = `ensureCoverage` (HTTP, hors transaction) puis `rebuild`
+  (DB + mémoire, idempotent : delete + reinsert depuis `from`).
+- `rebuild` : 4 requêtes par portefeuille puis parcours jour par jour en
+  mémoire. **Aucune requête dans la boucle.** Le CUMP est dans `PositionState`,
+  partagé avec `PortfolioValuationService` : courbe et dashboard doivent
+  toujours donner le même chiffre pour aujourd'hui.
+- Taux : `Transaction.exchangeRateToEur` = taux du **jour de l'opération**
+  (`ExchangeRateService.getRateAsOf`). Snapshots passés = taux historique du
+  jour ; aujourd'hui = taux courant.
+- Pas de cours de marché pour un jour → dernier cours connu ; aucun cours du
+  tout → prix de la dernière transaction (jamais 0 : faux décrochage).
+- `MarketDataJobs` : rattrapage au démarrage + 23h30, cotations + point du jour
+  chaque heure. Désactivé en test (`app.scheduling.enabled=false`).
+- Synchrone volontairement (dev). Passage en async : exécuter
+  `PortfolioHistoryListener.refreshDirty` sur un executor.
+
+## Points sensibles / dette technique restante
+- Endpoints `/api/admin/**` accessibles à tout utilisateur authentifié.
+- Le job horaire recalcule le point du jour de TOUS les portefeuilles
+  (OK à petite échelle ; à cibler sur les portefeuilles détenant les
+  symboles mis à jour si le volume grossit).
+
+## Conventions de code à respecter
+- DTOs : suffixes `CreateRequest` / `UpdateRequest` / `Response` par domaine,
+  mappers dédiés (`XxxMapper`), validations Bean Validation + règles métier
+  dans `validateBusinessRules(...)`.
+- Exceptions centralisées dans `/shared` (déjà en place, les réutiliser
+  plutôt qu'en recréer).
+- Tests unitaires obligatoires sur tout ce qui touche à
+  `PortfolioValuationService` (les scénarios couverts : achat simple,
+  achats multiples à prix différents/CUMP, vente partielle, vente totale,
+  dividende, prix manquant, devise étrangère) — c'est l'endroit où un bug
+  silencieux affiche des chiffres faux à l'utilisateur.
+
+## Ce qu'il ne faut PAS faire
+- Ne pas réintroduire Alpha Vantage / CoinGecko / AssetTemplate.
+- Ne pas faire choisir un symbole à la main par l'utilisateur.
+- Ne pas proposer de code "iso" avec des méthodes qui n'existent pas déjà
+  dans le repository/service — toujours vérifier l'existant avant de
+  fournir une modification.
+- Ne pas casser la compatibilité EUR-first du dashboard.
+
+## Repo
+https://github.com/Paulosouspopo/FollowYourMonney
