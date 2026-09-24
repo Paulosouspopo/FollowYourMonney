@@ -1,5 +1,6 @@
 package com.portfolio.tracker.imports.parser;
 
+import com.portfolio.tracker.shared.TimeZones;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -14,7 +15,7 @@ import java.util.Optional;
 public final class DateParsing {
 
     /** Fuseau des utilisateurs : les horodatages UTC (Trade Republic) y sont convertis. */
-    public static final ZoneId USER_ZONE = ZoneId.of("Europe/Paris");
+    public static final ZoneId USER_ZONE = TimeZones.USER_ZONE;
 
     private static final List<DateTimeFormatter> DATE_TIMES = List.of(
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"),

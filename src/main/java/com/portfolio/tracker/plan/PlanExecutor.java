@@ -5,6 +5,9 @@ import com.portfolio.tracker.cash.CashMovementRepository;
 import com.portfolio.tracker.cash.CashMovementService;
 import com.portfolio.tracker.cash.CashMovementType;
 import com.portfolio.tracker.cash.dto.CashMovementRequest;
+import com.portfolio.tracker.notification.Formats;
+import com.portfolio.tracker.notification.Notification;
+import com.portfolio.tracker.notification.NotificationService;
 import com.portfolio.tracker.portfolio.Portfolio;
 import com.portfolio.tracker.shared.MoneyConstants;
 import com.portfolio.tracker.transaction.TransactionRepository;
@@ -46,6 +49,7 @@ public class PlanExecutor {
     private final TransactionRepository transactionRepository;
     private final CashMovementRepository cashMovementRepository;
     private final MarketPriceLookup priceLookup;
+    private final NotificationService notificationService;
     private final TransactionTemplate txNew;
 
     public PlanExecutor(InvestmentPlanRepository planRepository,
@@ -54,6 +58,7 @@ public class PlanExecutor {
             TransactionRepository transactionRepository,
             CashMovementRepository cashMovementRepository,
             MarketPriceLookup priceLookup,
+            NotificationService notificationService,
             PlatformTransactionManager transactionManager) {
         this.planRepository = planRepository;
         this.transactionService = transactionService;
@@ -61,6 +66,7 @@ public class PlanExecutor {
         this.transactionRepository = transactionRepository;
         this.cashMovementRepository = cashMovementRepository;
         this.priceLookup = priceLookup;
+        this.notificationService = notificationService;
         this.txNew = new TransactionTemplate(transactionManager);
         this.txNew.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
@@ -72,7 +78,29 @@ public class PlanExecutor {
             return;
         }
         log.info("Investissements programmés : {} plan(s) à exécuter", ids.size());
-        ids.forEach(this::run);
+        for (UUID id : ids) {
+            int executed = run(id);
+            if (executed > 0) {
+                notifyExecuted(id, executed);
+            }
+        }
+    }
+
+    /** Prévient l'utilisateur des échéances exécutées par le job (pas lors d'une saisie : il le sait déjà). */
+    private void notifyExecuted(UUID planId, int executed) {
+        txNew.executeWithoutResult(s -> planRepository.findByIdForUpdate(planId).ifPresent(plan -> {
+            String what = plan.getType() == InvestmentPlan.Type.DEPOSIT
+                    ? "versement sur " + plan.getPortfolio().getName()
+                    : plan.getName();
+            String title = "Investissement programmé : " + Formats.eur(plan.getAmount()) + " — " + what;
+            String body = executed == 1
+                    ? "L'échéance du " + plan.getLastExecutionDate().format(DAY) + " a été ajoutée à « "
+                            + plan.getPortfolio().getName() + " »" + (plan.getType() == InvestmentPlan.Type.BUY
+                            ? " au cours de clôture du jour (prix estimé : l'import de ton relevé le remplacera)." : ".")
+                    : executed + " échéances ont été ajoutées à « " + plan.getPortfolio().getName() + " ».";
+            notificationService.notify(plan.getPortfolio().getUser().getId(), Notification.Type.PLAN, title, body,
+                    "/portfolios/" + plan.getPortfolio().getId(), false);
+        }));
     }
 
     /**

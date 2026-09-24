@@ -161,6 +161,23 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
 - Import : un achat du relevé à ±4 jours d'une échéance de plan sur le même
   actif est proposé comme doublon (l'exécution réelle du courtier).
 
+## Notifications (`notification/`)
+- `NotificationService.notify` : point d'entrée unique ; toujours dans la
+  boîte de réception (`notifications`), + email si demandé. (Push à venir.)
+- `AlertRule` : périmètre GLOBAL / PORTFOLIO / ASSET (actif détenu ou non),
+  condition RISES / FALLS / MOVES (% sur DAY/WEEK/MONTH) ou ABOVE / BELOW (EUR).
+- `AlertEvaluator` : appelé par `MarketDataJobs` juste après la mise à jour
+  horaire des cours. Portefeuille/patrimoine : variation de PLUS-VALUE
+  rapportée à la valeur de départ (snapshot) → un versement/achat ne
+  déclenche rien. Actif : cours EUR vs clôture passée. Anti-répétition :
+  désarmée après déclenchement, réarmée quand la condition retombe (ou
+  chaque nouveau jour pour une variation sur 1 jour).
+- `ReportService` : rapport DAILY / WEEKLY (lundi) à l'heure choisie
+  (Europe/Paris, `TimeZones`), job à hh:15 ; aperçu via
+  `/api/report-settings/preview`.
+- `PlanExecutor.runDuePlans` notifie les échéances exécutées par le job.
+- Purge des notifications de plus de 180 jours.
+
 ## Dev local : antivirus Avast
 - Avast (« Web/Mail Shield », analyse HTTPS) re-signe tout le trafic HTTPS :
   Java refuse alors Yahoo (`PKIX path building failed`), git et Docker aussi.

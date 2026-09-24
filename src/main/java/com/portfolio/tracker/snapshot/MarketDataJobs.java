@@ -1,5 +1,6 @@
 package com.portfolio.tracker.snapshot;
 
+import com.portfolio.tracker.notification.alert.AlertEvaluator;
 import com.portfolio.tracker.assetprice.AssetPriceService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +27,7 @@ public class MarketDataJobs {
 
     private final AssetPriceService assetPriceService;
     private final PortfolioHistoryService historyService;
+    private final AlertEvaluator alertEvaluator;
 
     /** Rattrape la période pendant laquelle le backend était éteint. */
     @EventListener(ApplicationReadyEvent.class)
@@ -38,6 +40,8 @@ public class MarketDataJobs {
     public void refreshTodayPrices() {
         assetPriceService.updateAllAssetPrices();
         historyService.rebuildAll(LocalDate.now());
+        // Cours et point du jour à jour : les alertes voient les derniers chiffres
+        alertEvaluator.evaluateAll();
     }
 
     /** Consolidation quotidienne : clôtures officielles de la veille + snapshots. */
