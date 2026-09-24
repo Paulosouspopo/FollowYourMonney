@@ -8,23 +8,29 @@ import java.util.List;
 public record YahooChartResponse(Chart chart) {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record Chart(List<Result> result, Object error) {}
+    public record Chart(List<Result> result, Object error) {
+    }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record Result(Meta meta) {}
+    public record Result(Meta meta, List<Long> timestamp, Indicators indicators) {
+    }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record Meta(
-            String currency,
             String symbol,
-            String exchangeName,
-            String fullExchangeName,
-            String instrumentType,
-            double regularMarketPrice,
-            double regularMarketChangePercent,
-            double fiftyTwoWeekHigh,
-            double fiftyTwoWeekLow,
+            String currency,
+            Double regularMarketPrice,
             String longName,
-            String shortName
-    ) {}
+            String shortName,
+            String fullExchangeName,
+            String instrumentType) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record Indicators(List<Quote> quote) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record Quote(List<Double> close) {
+    } // peut contenir des null (jours sans cotation)
 }

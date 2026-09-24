@@ -5,8 +5,10 @@ import com.portfolio.tracker.assetprice.AssetPriceRepository;
 import com.portfolio.tracker.assetprice.dto.LatestPriceProjection;
 import com.portfolio.tracker.dashboard.dto.*;
 import com.portfolio.tracker.portfolio.Portfolio;
+import com.portfolio.tracker.portfolio.PortfolioRepository;
 import com.portfolio.tracker.shared.CurrencyConverter;
 import com.portfolio.tracker.shared.MoneyConstants;
+import com.portfolio.tracker.shared.exception.ResourceNotFoundException;
 import com.portfolio.tracker.transaction.Transaction;
 import com.portfolio.tracker.transaction.TransactionRepository;
 import lombok.RequiredArgsConstructor;
@@ -42,6 +44,7 @@ import java.util.stream.Collectors;
 public class PortfolioValuationService {
 
     private final TransactionRepository transactionRepository;
+    private final PortfolioRepository portfolioRepository;
     private final AssetPriceRepository assetPriceRepository;
     private final CurrencyConverter currencyConverter;
 
@@ -53,32 +56,63 @@ public class PortfolioValuationService {
      */
     public ValuationResult valuate(UUID userId, UUID portfolioIdOrNull, LocalDateTime asOf) {
 
-        List<Transaction> transactions = transactionRepository.findAllForValuation(userId, portfolioIdOrNull, asOf);
+        // 1. Source de vérité : les portefeuilles de l'utilisateur
+        List<Portfolio> portfolios = (portfolioIdOrNull == null)
+                ? portfolioRepository.findByUserId(userId)
+                : portfolioRepository.findByIdAndUserId(portfolioIdOrNull, userId)
+                        .map(List::of)
+                        .orElseThrow(() -> new ResourceNotFoundException("Portfolio non accessible"));
 
-        if (transactions.isEmpty()) {
+        if (portfolios.isEmpty()) {
             return ValuationResult.empty();
         }
+
+        // 2. Transactions (peut être vide, ce n'est plus un cas d'arrêt)
+        List<Transaction> transactions = transactionRepository.findAllForValuation(userId, portfolioIdOrNull, asOf);
 
         Set<String> symbols = transactions.stream()
                 .map(t -> t.getAsset().getSymbol())
                 .collect(Collectors.toSet());
 
-        Map<String, PriceSnapshot> prices = loadPrices(symbols, asOf);
+        Map<String, PriceSnapshot> prices = symbols.isEmpty()
+                ? Map.of()
+                : loadPrices(symbols, asOf);
 
-        // Regroupement en mémoire : plus aucune requête à partir d'ici
         Map<UUID, List<Transaction>> byPortfolio = transactions.stream()
                 .collect(Collectors.groupingBy(t -> t.getAsset().getPortfolio().getId()));
 
         CurrencyConverter.Session fxSession = currencyConverter.openSession();
 
-        List<PortfolioValuation> portfolios = byPortfolio.values().stream()
-                .map(txs -> valuatePortfolio(txs, prices, fxSession))
+        // 3. Un PortfolioValuation par portefeuille, même vide
+        List<PortfolioValuation> valuations = portfolios.stream()
+                .map(p -> {
+                    List<Transaction> txs = byPortfolio.getOrDefault(p.getId(), List.of());
+                    return txs.isEmpty()
+                            ? emptyValuation(p)
+                            : valuatePortfolio(txs, prices, fxSession);
+                })
                 .toList();
 
-        return ValuationResult.aggregate(portfolios);
+        return ValuationResult.aggregate(valuations);
     }
 
-    // --------------------------------------------------------- niveau portfolio
+    private PortfolioValuation emptyValuation(Portfolio portfolio) {
+        return PortfolioValuation.builder()
+                .portfolioId(portfolio.getId())
+                .name(portfolio.getName())
+                .type(portfolio.getType())
+                .currentValueEur(BigDecimal.ZERO)
+                .investedEur(BigDecimal.ZERO)
+                .unrealizedGainEur(BigDecimal.ZERO)
+                .unrealizedGainPercentage(BigDecimal.ZERO)
+                .realizedGainEur(BigDecimal.ZERO)
+                .dividendsEur(BigDecimal.ZERO)
+                .totalFeesEur(BigDecimal.ZERO)
+                .positions(List.of())
+                .openPositionCount(0)
+                .hasIncompletePrices(false)
+                .build();
+    }
 
     private PortfolioValuation valuatePortfolio(List<Transaction> portfolioTxs,
             Map<String, PriceSnapshot> prices,

@@ -5,12 +5,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
-import java.util.UUID;
-
 public record PortfolioCreateRequest(
-
-        @NotNull(message = "L'utilisateur est obligatoire")
-        UUID userId,
 
         @NotBlank(message = "Le nom est obligatoire")
         @Size(max = 100, message = "Le nom ne doit pas dépasser 100 caractères")

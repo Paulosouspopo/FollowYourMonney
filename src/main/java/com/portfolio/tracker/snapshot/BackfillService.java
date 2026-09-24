@@ -1,5 +1,7 @@
 package com.portfolio.tracker.snapshot;
 
+import com.portfolio.tracker.asset.Asset;
+import com.portfolio.tracker.asset.AssetRepository;
 import com.portfolio.tracker.portfolio.Portfolio;
 import com.portfolio.tracker.portfolio.PortfolioRepository;
 import com.portfolio.tracker.transaction.TransactionRepository;
@@ -11,7 +13,9 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -20,6 +24,7 @@ public class BackfillService {
 
     private final PortfolioRepository portfolioRepository;
     private final TransactionRepository transactionRepository;
+    private final AssetRepository assetRepository;
     private final SnapshotWriter snapshotWriter;
 
     @Async
@@ -72,5 +77,38 @@ public class BackfillService {
         }
         log.info("Backfill portefeuille {} : {} jours traités (depuis {})",
                 portfolio.getId(), written, start);
+    }
+
+    /**
+     * Régénère les snapshots des portefeuilles détenant ce symbole, sur tout leur
+     * historique.
+     */
+    public void backfillPortfoliosForSymbol(String symbol) {
+        List<Asset> assets = assetRepository.findAllBySymbol(symbol);
+        Set<Portfolio> portfolios = assets.stream()
+                .map(Asset::getPortfolio)
+                .collect(Collectors.toSet());
+
+        log.info("Régénération snapshots pour {} portefeuille(s) suite backfill de {}",
+                portfolios.size(), symbol);
+
+        for (Portfolio portfolio : portfolios) {
+            backfillPortfolioFull(portfolio);
+        }
+    }
+
+    public void backfillPortfolioFull(Portfolio portfolio) {
+        LocalDate premiere = transactionRepository.findFirstTransactionDate(portfolio.getId())
+                .map(LocalDateTime::toLocalDate).orElse(null);
+        if (premiere == null)
+            return;
+
+        LocalDate today = LocalDate.now();
+        int written = 0;
+        for (LocalDate day = premiere; !day.isAfter(today); day = day.plusDays(1)) {
+            snapshotWriter.writeAsOf(portfolio, day, day.atTime(23, 59, 59));
+            written++;
+        }
+        log.info("Backfill complet portefeuille {} : {} jours", portfolio.getId(), written);
     }
 }

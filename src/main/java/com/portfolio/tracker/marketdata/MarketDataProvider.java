@@ -1,5 +1,7 @@
 package com.portfolio.tracker.marketdata;
 
+import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -8,12 +10,14 @@ import java.util.Optional;
  * sans impacter AssetPriceService.
  */
 public interface MarketDataProvider {
+    Optional<MarketQuote> getQuote(String symbol);
+
+    List<MarketPricePoint> getDailyHistory(String symbol, String range);
 
     /**
-     * Récupère le dernier prix connu pour un symbole.
-     *
-     * @param symbol symbole tel qu'attendu par le provider (ex: "BTC-USD")
-     * @return le résultat de cotation, vide si le symbole est introuvable ou l'API indisponible
+     * Historique borné précisément, pour combler un trou sans tout retélécharger.
      */
-    Optional<MarketQuote> getQuote(String symbol);
+    List<MarketPricePoint> getDailyHistory(String symbol, LocalDate from, LocalDate to);
+
+    List<AssetSearchResult> search(String query);
 }

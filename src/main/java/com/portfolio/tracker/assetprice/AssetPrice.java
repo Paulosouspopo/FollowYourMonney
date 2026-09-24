@@ -8,11 +8,9 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(
-        name = "asset_prices",
-        indexes = {
-                @Index(name = "idx_asset_prices_symbol_last_updated", columnList = "symbol, lastUpdated")
-        }
+@Table( name = "asset_prices", 
+        indexes = { @Index(name = "idx_asset_prices_symbol_last_updated", columnList = "symbol, lastUpdated") }, 
+        uniqueConstraints = @UniqueConstraint(name = "uk_asset_prices_symbol_date", columnNames = {"symbol", "lastUpdated" })
 )
 @Data
 @NoArgsConstructor
@@ -20,17 +18,17 @@ import java.util.UUID;
 @Builder
 public class AssetPrice {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
-    private UUID id;
+        @Id
+        @GeneratedValue(strategy = GenerationType.UUID)
+        private UUID id;
 
-    @Column(nullable = false)
-    private String symbol;
+        @Column(nullable = false)
+        private String symbol;
 
-    @Column(nullable = false, precision = 19, scale = 8)
-    private BigDecimal price;
+        @Column(nullable = false, precision = 19, scale = 8)
+        private BigDecimal price;
 
-    private String currency;
-    private LocalDateTime lastUpdated;
-    private String source;
+        private String currency;
+        private LocalDateTime lastUpdated;
+        private String source;
 }

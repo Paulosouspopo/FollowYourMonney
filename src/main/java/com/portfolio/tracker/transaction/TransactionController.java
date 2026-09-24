@@ -1,7 +1,5 @@
 package com.portfolio.tracker.transaction;
 
-import com.portfolio.tracker.asset.dto.AvailableAssetResponse;
-import com.portfolio.tracker.asset.external.AssetExternalService;
 import com.portfolio.tracker.security.CustomUserDetails;
 import com.portfolio.tracker.transaction.dto.TransactionCreateRequest;
 import com.portfolio.tracker.transaction.dto.TransactionResponse;
@@ -23,23 +21,6 @@ import java.util.UUID;
 public class TransactionController {
 
     private final TransactionService transactionService;
-    private final AssetExternalService assetExternalService;
-
-    /**
-     * Récupère les assets disponibles pour ajouter une transaction
-     */
-    @GetMapping("/available-assets")
-    public ResponseEntity<List<AvailableAssetResponse>> getAvailableAssets() {
-        List<AvailableAssetResponse> assets = assetExternalService.getAvailableAssets().stream()
-                .map(template -> AvailableAssetResponse.builder()
-                        .symbol(template.getSymbol())
-                        .name(template.getName())
-                        .type(template.getType())
-                        .currency(template.getCurrency())
-                        .build())
-                .toList();
-        return ResponseEntity.ok(assets);
-    }
 
     /**
      * Récupère les transactions d'un asset

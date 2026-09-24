@@ -8,6 +8,7 @@ import com.portfolio.tracker.dashboard.dto.PortfolioValuation;
 import com.portfolio.tracker.dashboard.dto.PositionValuation;
 import com.portfolio.tracker.dashboard.dto.ValuationResult;
 import com.portfolio.tracker.portfolio.Portfolio;
+import com.portfolio.tracker.portfolio.PortfolioRepository;
 import com.portfolio.tracker.portfolio.PortfolioType;
 import com.portfolio.tracker.shared.CurrencyConverter;
 import com.portfolio.tracker.transaction.Transaction;
@@ -27,6 +28,7 @@ import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -52,6 +54,9 @@ class PortfolioValuationServiceTest {
 
     @Mock
     private CurrencyConverter currencyConverter;
+
+    @Mock
+    private PortfolioRepository portfolioRepository;
 
     @InjectMocks
     private PortfolioValuationService valuationService;
@@ -93,6 +98,10 @@ class PortfolioValuationServiceTest {
                 .assetType(AssetType.CRYPTO)
                 .portfolio(portfolio)
                 .build();
+
+        lenient().when(portfolioRepository.findByUserId(userId)).thenReturn(List.of(portfolio));
+        lenient().when(portfolioRepository.findByIdAndUserId(portfolio.getId(), userId))
+                .thenReturn(Optional.of(portfolio));
     }
 
     // ---------------- Helpers ----------------
@@ -404,6 +413,8 @@ class PortfolioValuationServiceTest {
                     .type(PortfolioType.CTO)
                     .build();
 
+            when(portfolioRepository.findByUserId(userId)).thenReturn(List.of(portfolio, cto));
+
             Asset eth = Asset.builder()
                     .id(UUID.randomUUID())
                     .symbol("ETH-USD")
@@ -435,13 +446,14 @@ class PortfolioValuationServiceTest {
         }
 
         @Test
-        @DisplayName("Aucune transaction → résultat vide et neutre, pas de division par zéro")
+        @DisplayName("Aucune transaction → portefeuille visible mais neutre, pas de division par zéro")
         void aucuneTransaction() {
             givenTransactions();
 
             ValuationResult result = valuationService.valuate(userId, null, null);
 
-            assertThat(result.getPortfolios()).isEmpty();
+            assertThat(result.getPortfolios()).hasSize(1);
+            assertThat(result.getPortfolios().get(0).getPositions()).isEmpty();
             assertThat(result.getTotalInvestedEur()).isEqualByComparingTo("0.00");
             assertThat(result.getTotalValueEur()).isEqualByComparingTo("0.00");
             assertThat(result.getTotalUnrealizedGainEur()).isEqualByComparingTo("0.00");
