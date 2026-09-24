@@ -28,5 +28,7 @@ public class DashboardResponse {
 
     private List<PortfolioValuation> portfolios;
     private List<AllocationSliceDTO> allocation;
+    /** Montants de la courbe dans {@link #curveCurrency} (taux historique de chaque jour). */
     private List<CurvePointDTO> curve;
+    private String curveCurrency;
 }

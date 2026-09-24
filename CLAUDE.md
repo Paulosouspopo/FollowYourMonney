@@ -206,6 +206,31 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
   alertes) et `GET /api/market/history?symbol=&range=1M|3M|6M|1Y|5Y`.
   Symbole en paramètre de requête (`^FCHI`, `EURUSD=X`).
 
+## Performance (`performance/`)
+- Chaque snapshot porte `net_flow` (flux externe du jour) et
+  `performance_value` (valeur, découvert de liquidités compté à 0), calculés
+  dans le `rebuild` (`PerformanceFlows`) :
+  - compte avec suivi des liquidités : versements - retraits, + découvert
+    apparu (achat non financé = apport implicite, pas une perte) ; intérêts,
+    dividendes et frais = rendement ;
+  - compte sans suivi : achat (frais compris) = apport, vente et dividende
+    nets = retrait.
+- Snapshots sans flux (antérieurs à V9) : `catchUp` recalcule entièrement
+  les portefeuilles concernés.
+- `PerformanceCalculator` (pur, testé) : TWR en Dietz journalier
+  (apport en début de journée, retrait en fin de journée), XIRR (Newton puis
+  dichotomie). Annualisation seulement au-delà d'un an.
+- `GET /api/performance[/portfolios/{id}]?period=1m|3m|ytd|1y|3y|5y|all&benchmark=`
+  : TWR, rendement de l'argent (MWR / XIRR), gain, apports nets, série
+  jour par jour, indice rebasé en EUR (paire FX historique), classement des
+  portefeuilles en vue globale.
+
+## Devise d'affichage
+- `DisplayCurrency` : EUR, USD, GBP, CHF. `GET /api/exchange-rates/display`
+  (taux du jour). `?currency=` sur `/api/dashboard` : la courbe est convertie
+  au taux de chaque jour (`curveCurrency`) ; les totaux restent en EUR (le
+  front les convertit au taux du jour). Les calculs restent en EUR.
+
 ## Dev local : antivirus Avast
 - Avast (« Web/Mail Shield », analyse HTTPS) re-signe tout le trafic HTTPS :
   Java refuse alors Yahoo (`PKIX path building failed`), git et Docker aussi.

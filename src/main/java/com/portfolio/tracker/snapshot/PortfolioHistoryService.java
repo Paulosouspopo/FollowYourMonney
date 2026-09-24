@@ -112,9 +112,14 @@ public class PortfolioHistoryService {
      */
     public void catchUp() {
         List<UUID> ids = portfolioRepository.findAllIds();
-        log.info("===== Rattrapage de l'historique : {} portefeuille(s) =====", ids.size());
+        // Snapshots sans flux (antérieurs au calcul de performance) : recalcul complet
+        Set<UUID> incomplete = new java.util.HashSet<>(
+                Objects.requireNonNull(txNew.execute(s -> snapshotRepository.findPortfolioIdsMissingFlows())));
+        log.info("===== Rattrapage de l'historique : {} portefeuille(s), {} à recalculer entièrement =====",
+                ids.size(), incomplete.size());
         for (UUID id : ids) {
-            LocalDate last = txNew.execute(s -> snapshotRepository.findLastSnapshotDate(id).orElse(null));
+            LocalDate last = incomplete.contains(id) ? null
+                    : txNew.execute(s -> snapshotRepository.findLastSnapshotDate(id).orElse(null));
             refresh(id, last);
         }
         log.info("===== Rattrapage terminé =====");
@@ -216,21 +221,38 @@ public class PortfolioHistoryService {
         int next = 0;
         int nextMovement = 0;
 
+        // État de départ : événements antérieurs à la plage recalculée (leurs
+        // flux sont déjà dans les snapshots conservés)
+        while (next < txs.size() && day(txs.get(next)).isBefore(start)) {
+            replay(txs.get(next++), states, symbols, cash, trackCash);
+        }
+        while (nextMovement < movements.size() && movements.get(nextMovement).getMovementDate().isBefore(start)) {
+            cash.apply(movements.get(nextMovement++));
+        }
+        // Apports cumulés (versements nets + découvert) : leur variation du jour = flux externe
+        BigDecimal contributedBefore = PerformanceFlows.contributed(cash);
+
         for (LocalDate day = start; !day.isAfter(today); day = day.plusDays(1)) {
-            // Rejoue tous les événements jusqu'à ce jour inclus (y compris
-            // ceux antérieurs à start lors de la première itération).
+            BigDecimal tradeFlow = BigDecimal.ZERO;
             while (next < txs.size() && !day(txs.get(next)).isAfter(day)) {
                 Transaction tx = txs.get(next++);
-                states.computeIfAbsent(tx.getAsset().getId(), id -> new PositionState()).apply(tx);
-                symbols.putIfAbsent(tx.getAsset().getId(), tx.getAsset().getSymbol());
-                if (trackCash) {
-                    cash.apply(tx);
-                }
+                replay(tx, states, symbols, cash, trackCash);
+                tradeFlow = tradeFlow.add(PerformanceFlows.tradeFlow(tx));
             }
             while (nextMovement < movements.size() && !movements.get(nextMovement).getMovementDate().isAfter(day)) {
                 cash.apply(movements.get(nextMovement++));
             }
-            snapshots.add(snapshotOf(portfolio, day, states, symbols, cash, market, today));
+            BigDecimal flow = tradeFlow;
+            if (trackCash) {
+                BigDecimal contributed = PerformanceFlows.contributed(cash);
+                flow = contributed.subtract(contributedBefore);
+                contributedBefore = contributed;
+            }
+            PortfolioSnapshot snapshot = snapshotOf(portfolio, day, states, symbols, cash, market, today);
+            snapshot.setNetFlow(flow.setScale(MoneyConstants.MONEY_SCALE, MoneyConstants.ROUNDING));
+            snapshot.setPerformanceValue(snapshot.getTotalValue().add(PerformanceFlows.deficit(cash))
+                    .setScale(MoneyConstants.MONEY_SCALE, MoneyConstants.ROUNDING));
+            snapshots.add(snapshot);
         }
 
         snapshotRepository.saveAll(snapshots);
@@ -287,6 +309,15 @@ public class PortfolioHistoryService {
                                 .divide(positionsCost, MoneyConstants.PERCENT_SCALE, MoneyConstants.ROUNDING))
                 .baseCurrency(MoneyConstants.BASE_CURRENCY)
                 .build();
+    }
+
+    private static void replay(Transaction tx, Map<UUID, PositionState> states, Map<UUID, String> symbols,
+            CashState cash, boolean trackCash) {
+        states.computeIfAbsent(tx.getAsset().getId(), id -> new PositionState()).apply(tx);
+        symbols.putIfAbsent(tx.getAsset().getId(), tx.getAsset().getSymbol());
+        if (trackCash) {
+            cash.apply(tx);
+        }
     }
 
     // ============================================================ données marché
