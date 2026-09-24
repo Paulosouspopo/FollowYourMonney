@@ -20,6 +20,10 @@ public class DashboardResponse {
     private BigDecimal realizedGainEur;
     private BigDecimal dividendsEur;
     private BigDecimal totalFeesEur;
+    private BigDecimal interestEur;
+    /** Liquidités suivies (livrets compris), incluses dans totalValueEur. */
+    private BigDecimal cashEur;
+    private BigDecimal netDepositsEur;
     private boolean hasIncompletePrices;
 
     private List<PortfolioValuation> portfolios;

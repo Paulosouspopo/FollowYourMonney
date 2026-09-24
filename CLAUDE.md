@@ -71,7 +71,7 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
   commit** (sinon le recalcul, en REQUIRES_NEW, ne voit pas les données).
 - `refresh` = `ensureCoverage` (HTTP, hors transaction) puis `rebuild`
   (DB + mémoire, idempotent : delete + reinsert depuis `from`).
-- `rebuild` : 4 requêtes par portefeuille puis parcours jour par jour en
+- `rebuild` : 5 requêtes par portefeuille (dont les mouvements d'argent) puis parcours jour par jour en
   mémoire. **Aucune requête dans la boucle.** Le CUMP est dans `PositionState`,
   partagé avec `PortfolioValuationService` : courbe et dashboard doivent
   toujours donner le même chiffre pour aujourd'hui.
@@ -96,6 +96,25 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
   identique pour la valorisation et l'historique.
 - Aucun cours de marché → valorisation au prix de la dernière transaction
   (`priceMissing = true`), dashboard comme courbe.
+
+## Liquidités et livrets
+- `CashMovement` (versement, retrait, intérêts, frais de compte), en EUR,
+  montant toujours positif (le type donne le sens). API :
+  `/api/portfolios/{id}/cash-movements`.
+- `Portfolio.cashTracking` : le solde entre dans la valeur. Forcé pour un
+  LIVRET (`PortfolioRules`), optionnel ailleurs ; mouvements refusés si
+  désactivé ; le changer relance un recalcul complet de l'historique.
+- Solde (`CashState`, partagé valorisation/historique comme `PositionState`) =
+  versements - retraits + intérêts - frais de compte - (achats + frais)
+  + (ventes - frais) + (dividendes - frais). Peut être négatif sur un compte
+  (versements non saisis) ; jamais sur un livret (refusé, y compris via une
+  suppression).
+- Valeur = positions + liquidités ; investi = prix de revient + liquidités
+  (la plus-value latente reste celle des positions) ; % latent calculé sur le
+  seul prix de revient. Mêmes règles dans les snapshots.
+- Un livret ne détient pas d'actifs : transactions refusées, et un
+  portefeuille avec actifs ne peut pas devenir un livret.
+- Répartition : catégorie = type d'actif, `LIVRET`, ou `LIQUIDITES`.
 
 ## Sécurité
 - **Session** : JWT d'accès court (15 min, en-tête `Authorization`) + jeton

@@ -3,6 +3,8 @@ package com.portfolio.tracker.dashboard;
 import com.portfolio.tracker.asset.Asset;
 import com.portfolio.tracker.assetprice.AssetPriceRepository;
 import com.portfolio.tracker.assetprice.dto.LatestPriceProjection;
+import com.portfolio.tracker.cash.CashMovement;
+import com.portfolio.tracker.cash.CashMovementRepository;
 import com.portfolio.tracker.dashboard.dto.*;
 import com.portfolio.tracker.portfolio.Portfolio;
 import com.portfolio.tracker.portfolio.PortfolioRepository;
@@ -34,7 +36,10 @@ import java.util.stream.Collectors;
  * (figé sur la transaction). La valeur courante (currentValueEur) utilise
  * le taux du jour. C'est volontaire : le montant que j'ai sorti de ma poche
  * ne bouge pas rétroactivement parce que l'euro a fluctué depuis.
- * 4. Aucun cours de marché : la position est valorisée au prix de sa
+ * 4. Liquidités (portefeuilles avec suivi, livrets) : le solde s'ajoute à la
+ * valeur et à l'investi ; le % de plus-value latente reste calculé sur le seul
+ * prix de revient des positions.
+ * 5. Aucun cours de marché : la position est valorisée au prix de sa
  * dernière transaction (même règle que la courbe historique, jamais 0) et
  * signalée via {@code priceMissing}.
  */
@@ -48,6 +53,7 @@ public class PortfolioValuationService {
     private final PortfolioRepository portfolioRepository;
     private final AssetPriceRepository assetPriceRepository;
     private final CurrencyConverter currencyConverter;
+    private final CashMovementRepository cashMovementRepository;
 
     /**
      * Valorise un ou tous les portefeuilles d'un utilisateur, à une date donnée.
@@ -68,8 +74,12 @@ public class PortfolioValuationService {
             return ValuationResult.empty();
         }
 
-        // 2. Transactions (peut être vide, ce n'est plus un cas d'arrêt)
+        // 2. Transactions et mouvements d'argent (une requête chacun)
         List<Transaction> transactions = transactionRepository.findAllForValuation(userId, portfolioIdOrNull, asOf);
+        Map<UUID, List<CashMovement>> movementsByPortfolio = cashMovementRepository
+                .findAllForValuation(userId, portfolioIdOrNull).stream()
+                .filter(m -> asOf == null || !m.getMovementDate().isAfter(asOf.toLocalDate()))
+                .collect(Collectors.groupingBy(m -> m.getPortfolio().getId()));
 
         Set<String> symbols = transactions.stream()
                 .map(t -> t.getAsset().getSymbol())
@@ -86,58 +96,45 @@ public class PortfolioValuationService {
 
         // 3. Un PortfolioValuation par portefeuille, même vide
         List<PortfolioValuation> valuations = portfolios.stream()
-                .map(p -> {
-                    List<Transaction> txs = byPortfolio.getOrDefault(p.getId(), List.of());
-                    return txs.isEmpty()
-                            ? emptyValuation(p)
-                            : valuatePortfolio(txs, prices, fxSession);
-                })
+                .map(p -> valuatePortfolio(p,
+                        byPortfolio.getOrDefault(p.getId(), List.of()),
+                        movementsByPortfolio.getOrDefault(p.getId(), List.of()),
+                        prices, fxSession))
                 .toList();
 
         return ValuationResult.aggregate(valuations);
     }
 
-    private PortfolioValuation emptyValuation(Portfolio portfolio) {
-        return PortfolioValuation.builder()
-                .portfolioId(portfolio.getId())
-                .name(portfolio.getName())
-                .type(portfolio.getType())
-                .currentValueEur(BigDecimal.ZERO)
-                .investedEur(BigDecimal.ZERO)
-                .unrealizedGainEur(BigDecimal.ZERO)
-                .unrealizedGainPercentage(BigDecimal.ZERO)
-                .realizedGainEur(BigDecimal.ZERO)
-                .dividendsEur(BigDecimal.ZERO)
-                .totalFeesEur(BigDecimal.ZERO)
-                .positions(List.of())
-                .openPositionCount(0)
-                .hasIncompletePrices(false)
-                .build();
-    }
-
-    private PortfolioValuation valuatePortfolio(List<Transaction> portfolioTxs,
+    private PortfolioValuation valuatePortfolio(Portfolio portfolio,
+            List<Transaction> portfolioTxs,
+            List<CashMovement> movements,
             Map<String, PriceSnapshot> prices,
             CurrencyConverter.Session fxSession) {
-
-        Portfolio portfolio = portfolioTxs.get(0).getAsset().getPortfolio();
 
         Map<UUID, List<Transaction>> byAsset = portfolioTxs.stream()
                 .collect(Collectors.groupingBy(t -> t.getAsset().getId()));
 
         List<PositionValuation> positions = byAsset.values().stream()
-                .map(txs -> valuatePosition(txs, prices, fxSession))
+                .map(txs -> valuatePosition(new ArrayList<>(txs), prices, fxSession))
                 .filter(p -> p.getQuantity().signum() > 0
                         || p.getRealizedGainEur().signum() != 0
                         || p.getDividendsEur().signum() != 0)
                 .sorted(Comparator.comparing(PositionValuation::getSymbol))
                 .toList();
 
-        BigDecimal currentValue = sum(positions, PositionValuation::getCurrentValueEur);
-        BigDecimal invested = sum(positions, PositionValuation::getInvestedEur);
-        BigDecimal unrealized = currentValue.subtract(invested);
-        BigDecimal realized = sum(positions, PositionValuation::getRealizedGainEur);
-        BigDecimal dividends = sum(positions, PositionValuation::getDividendsEur);
+        BigDecimal positionsValue = sum(positions, PositionValuation::getCurrentValueEur);
+        BigDecimal positionsCost = sum(positions, PositionValuation::getInvestedEur);
+        BigDecimal unrealized = positionsValue.subtract(positionsCost);
         BigDecimal fees = sum(positions, PositionValuation::getTotalFeesEur);
+
+        // Liquidités (règles dans CashState) : ignorées si le suivi est désactivé
+        CashState cash = new CashState();
+        if (portfolio.isCashTracking()) {
+            movements.forEach(cash::apply);
+            portfolioTxs.forEach(cash::apply);
+            fees = fees.add(cash.getAccountFeesEur());
+        }
+        BigDecimal cashEur = scale(cash.getBalanceEur());
 
         long openCount = positions.stream().filter(p -> p.getQuantity().signum() > 0).count();
 
@@ -145,17 +142,26 @@ public class PortfolioValuationService {
                 .portfolioId(portfolio.getId())
                 .name(portfolio.getName())
                 .type(portfolio.getType())
-                .currentValueEur(currentValue)
-                .investedEur(invested)
+                .currentValueEur(positionsValue.add(cashEur))
+                .investedEur(positionsCost.add(cashEur))
                 .unrealizedGainEur(unrealized)
-                .unrealizedGainPercentage(percentage(unrealized, invested))
-                .realizedGainEur(realized)
-                .dividendsEur(dividends)
-                .totalFeesEur(fees)
+                .unrealizedGainPercentage(percentage(unrealized, positionsCost))
+                .realizedGainEur(sum(positions, PositionValuation::getRealizedGainEur))
+                .dividendsEur(sum(positions, PositionValuation::getDividendsEur))
+                .interestEur(scale(cash.getInterestEur()))
+                .totalFeesEur(scale(fees))
+                .cashTracking(portfolio.isCashTracking())
+                .cashEur(cashEur)
+                .netDepositsEur(scale(cash.getNetDepositsEur()))
+                .annualInterestRate(portfolio.getAnnualInterestRate())
                 .positions(positions)
                 .openPositionCount((int) openCount)
                 .hasIncompletePrices(positions.stream().anyMatch(PositionValuation::isPriceMissing))
                 .build();
+    }
+
+    private static BigDecimal scale(BigDecimal v) {
+        return v.setScale(MoneyConstants.MONEY_SCALE, MoneyConstants.ROUNDING);
     }
 
     // ---------------------------------------------------------- niveau position

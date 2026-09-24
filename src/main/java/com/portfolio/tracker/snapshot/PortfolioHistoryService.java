@@ -1,5 +1,10 @@
 package com.portfolio.tracker.snapshot;
 
+import com.portfolio.tracker.cash.CashMovement;
+import com.portfolio.tracker.cash.CashMovementRepository;
+import com.portfolio.tracker.dashboard.CashState;
+import java.util.Comparator;
+import java.util.stream.Stream;
 import com.portfolio.tracker.assetprice.PriceHistoryService;
 import com.portfolio.tracker.assetprice.dto.DailyPrice;
 import com.portfolio.tracker.dashboard.PositionState;
@@ -42,8 +47,8 @@ import java.util.stream.Collectors;
  * (suppression puis réinsertion de la plage), dans une seule transaction.</li>
  * </ol>
  *
- * Coût de la reconstruction : 4 requêtes par portefeuille (transactions,
- * prix, amorces, taux) quel que soit le nombre de jours, puis un parcours
+ * Coût de la reconstruction : 5 requêtes par portefeuille (transactions,
+ * mouvements d'argent, prix, amorces, taux) quel que soit le nombre de jours, puis un parcours
  * jour par jour en mémoire en O(jours × positions + transactions). Aucune
  * requête dans la boucle.
  *
@@ -57,6 +62,7 @@ public class PortfolioHistoryService {
 
     private final PortfolioRepository portfolioRepository;
     private final TransactionRepository transactionRepository;
+    private final CashMovementRepository cashMovementRepository;
     private final PortfolioSnapshotRepository snapshotRepository;
     private final PriceHistoryService priceHistoryService;
     private final CurrencyConverter currencyConverter;
@@ -64,12 +70,14 @@ public class PortfolioHistoryService {
 
     public PortfolioHistoryService(PortfolioRepository portfolioRepository,
             TransactionRepository transactionRepository,
+            CashMovementRepository cashMovementRepository,
             PortfolioSnapshotRepository snapshotRepository,
             PriceHistoryService priceHistoryService,
             CurrencyConverter currencyConverter,
             PlatformTransactionManager transactionManager) {
         this.portfolioRepository = portfolioRepository;
         this.transactionRepository = transactionRepository;
+        this.cashMovementRepository = cashMovementRepository;
         this.snapshotRepository = snapshotRepository;
         this.priceHistoryService = priceHistoryService;
         this.currencyConverter = currencyConverter;
@@ -175,12 +183,23 @@ public class PortfolioHistoryService {
 
         LocalDate today = LocalDate.now();
         List<Transaction> txs = transactionRepository.findAllByPortfolioIdForHistory(portfolioId);
-        if (txs.isEmpty() || day(txs.get(0)).isAfter(today)) {
+        // Liquidités ignorées si le suivi est désactivé (même règle que la valorisation)
+        boolean trackCash = portfolio.isCashTracking();
+        List<CashMovement> movements = trackCash
+                ? cashMovementRepository.findAllByPortfolioIdForHistory(portfolioId)
+                : List.of();
+
+        // L'historique commence au premier événement : opération ou mouvement d'argent
+        LocalDate firstDay = Stream.concat(
+                        txs.stream().map(PortfolioHistoryService::day),
+                        movements.stream().map(CashMovement::getMovementDate))
+                .min(Comparator.naturalOrder())
+                .orElse(null);
+        if (firstDay == null || firstDay.isAfter(today)) {
             snapshotRepository.deleteByPortfolioId(portfolioId);
             return 0;
         }
 
-        LocalDate firstDay = day(txs.get(0));
         LocalDate start = requestedFrom == null || requestedFrom.isBefore(firstDay) ? firstDay : requestedFrom;
         if (start.isAfter(today)) {
             start = today;
@@ -192,18 +211,26 @@ public class PortfolioHistoryService {
 
         Map<UUID, PositionState> states = new HashMap<>();
         Map<UUID, String> symbols = new HashMap<>();
+        CashState cash = new CashState();
         List<PortfolioSnapshot> snapshots = new ArrayList<>();
         int next = 0;
+        int nextMovement = 0;
 
         for (LocalDate day = start; !day.isAfter(today); day = day.plusDays(1)) {
-            // Rejoue toutes les transactions jusqu'à ce jour inclus (y compris
-            // celles antérieures à start lors de la première itération).
+            // Rejoue tous les événements jusqu'à ce jour inclus (y compris
+            // ceux antérieurs à start lors de la première itération).
             while (next < txs.size() && !day(txs.get(next)).isAfter(day)) {
                 Transaction tx = txs.get(next++);
                 states.computeIfAbsent(tx.getAsset().getId(), id -> new PositionState()).apply(tx);
                 symbols.putIfAbsent(tx.getAsset().getId(), tx.getAsset().getSymbol());
+                if (trackCash) {
+                    cash.apply(tx);
+                }
             }
-            snapshots.add(snapshotOf(portfolio, day, states, symbols, market, today));
+            while (nextMovement < movements.size() && !movements.get(nextMovement).getMovementDate().isAfter(day)) {
+                cash.apply(movements.get(nextMovement++));
+            }
+            snapshots.add(snapshotOf(portfolio, day, states, symbols, cash, market, today));
         }
 
         snapshotRepository.saveAll(snapshots);
@@ -213,7 +240,7 @@ public class PortfolioHistoryService {
 
     private PortfolioSnapshot snapshotOf(Portfolio portfolio, LocalDate day,
             Map<UUID, PositionState> states, Map<UUID, String> symbols,
-            MarketData market, LocalDate today) {
+            CashState cash, MarketData market, LocalDate today) {
 
         BigDecimal value = BigDecimal.ZERO;
         BigDecimal invested = BigDecimal.ZERO;
@@ -240,8 +267,12 @@ public class PortfolioHistoryService {
                     .setScale(MoneyConstants.MONEY_SCALE, MoneyConstants.ROUNDING));
         }
 
-        value = value.setScale(MoneyConstants.MONEY_SCALE, MoneyConstants.ROUNDING);
-        invested = invested.setScale(MoneyConstants.MONEY_SCALE, MoneyConstants.ROUNDING);
+        // Même règle que PortfolioValuationService : les liquidités s'ajoutent à la
+        // valeur et à l'investi ; le % latent reste sur le prix de revient des positions.
+        BigDecimal positionsCost = invested.setScale(MoneyConstants.MONEY_SCALE, MoneyConstants.ROUNDING);
+        BigDecimal cashEur = cash.getBalanceEur().setScale(MoneyConstants.MONEY_SCALE, MoneyConstants.ROUNDING);
+        value = value.setScale(MoneyConstants.MONEY_SCALE, MoneyConstants.ROUNDING).add(cashEur);
+        invested = positionsCost.add(cashEur);
         BigDecimal gain = value.subtract(invested);
 
         return PortfolioSnapshot.builder()
@@ -250,10 +281,10 @@ public class PortfolioHistoryService {
                 .totalValue(value)
                 .totalInvested(invested)
                 .gainLoss(gain)
-                .gainLossPercentage(invested.signum() == 0
+                .gainLossPercentage(positionsCost.signum() == 0
                         ? BigDecimal.ZERO
                         : gain.multiply(BigDecimal.valueOf(100))
-                                .divide(invested, MoneyConstants.PERCENT_SCALE, MoneyConstants.ROUNDING))
+                                .divide(positionsCost, MoneyConstants.PERCENT_SCALE, MoneyConstants.ROUNDING))
                 .baseCurrency(MoneyConstants.BASE_CURRENCY)
                 .build();
     }

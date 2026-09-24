@@ -22,6 +22,8 @@ public class PortfolioMapper {
                 .name(request.name())
                 .description(request.description())
                 .type(request.type())
+                .cashTracking(PortfolioRules.cashTracking(request.type(), request.cashTracking()))
+                .annualInterestRate(request.annualInterestRate())
                 .user(user)
                 .build();
     }
@@ -32,6 +34,8 @@ public class PortfolioMapper {
                 portfolio.getName(),
                 portfolio.getDescription(),
                 portfolio.getType(),
+                portfolio.isCashTracking(),
+                portfolio.getAnnualInterestRate(),
                 portfolio.getUser().getId(),
                 portfolio.getCreatedAt(),
                 portfolio.getUpdatedAt());
@@ -49,6 +53,8 @@ public class PortfolioMapper {
                 portfolio.getName(),
                 portfolio.getDescription(),
                 portfolio.getType(),
+                portfolio.isCashTracking(),
+                portfolio.getAnnualInterestRate(),
                 portfolio.getUser().getId(),
                 assets,
                 portfolio.getCreatedAt(),

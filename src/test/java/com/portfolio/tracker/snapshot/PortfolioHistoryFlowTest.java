@@ -2,6 +2,9 @@ package com.portfolio.tracker.snapshot;
 
 import com.portfolio.tracker.AbstractIntegrationTest;
 import com.portfolio.tracker.assetprice.AssetPriceRepository;
+import com.portfolio.tracker.cash.CashMovementService;
+import com.portfolio.tracker.cash.CashMovementType;
+import com.portfolio.tracker.cash.dto.CashMovementRequest;
 import com.portfolio.tracker.assetprice.PriceHistoryCoverageRepository;
 import com.portfolio.tracker.dashboard.PortfolioValuationService;
 import com.portfolio.tracker.exchangerate.ExchangeRateRepository;
@@ -56,6 +59,7 @@ class PortfolioHistoryFlowTest extends AbstractIntegrationTest {
             USD_EUR, new BigDecimal("0.9"));
 
     @Autowired private TransactionService transactionService;
+    @Autowired private CashMovementService cashMovementService;
     @Autowired private PortfolioValuationService valuationService;
     @Autowired private PortfolioSnapshotRepository snapshotRepository;
     @Autowired private AssetPriceRepository assetPriceRepository;
@@ -178,6 +182,28 @@ class PortfolioHistoryFlowTest extends AbstractIntegrationTest {
 
         assertThat(assetPriceRepository.findBySymbolAndPriceDateBetween(AAPL, today.minusDays(10), today))
                 .hasSize(11);
+    }
+
+    @Test
+    @DisplayName("Suivi des liquidités : versement puis achat en USD → liquidités dans la courbe, point du jour = dashboard")
+    void liquiditesDansLaCourbe() {
+        Portfolio portfolio = portfolioRepository.findById(portfolioId).orElseThrow();
+        portfolio.setCashTracking(true);
+        portfolioRepository.save(portfolio);
+
+        cashMovementService.create(portfolioId, new CashMovementRequest(CashMovementType.DEPOSIT,
+                new BigDecimal("2000"), today.minusDays(12), null), userId);
+        transactionService.create(portfolioId, buy("10", "100", 10), userId); // 900 EUR au taux 0.9
+
+        List<PortfolioSnapshot> curve = snapshotRepository.findByPortfolioIdOrderBySnapshotDateAsc(portfolioId);
+        assertThat(curve.get(0).getSnapshotDate()).isEqualTo(today.minusDays(12));
+        assertThat(at(curve, today.minusDays(11)).getTotalValue()).isEqualByComparingTo("2000.00");
+        // J-5 : 1100 de liquidités + 10 × 150 USD × 0.9 ; investi = 900 + 1100
+        assertThat(at(curve, today.minusDays(5)).getTotalValue()).isEqualByComparingTo("2450.00");
+        assertThat(at(curve, today.minusDays(5)).getTotalInvested()).isEqualByComparingTo("2000.00");
+
+        assertThat(valuationService.valuate(userId, portfolioId, null).getTotalValueEur())
+                .isEqualByComparingTo(at(curve, today).getTotalValue());
     }
 
     @Test

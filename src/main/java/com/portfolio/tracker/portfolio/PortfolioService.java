@@ -4,12 +4,15 @@ import com.portfolio.tracker.portfolio.dto.PortfolioCreateRequest;
 import com.portfolio.tracker.portfolio.dto.PortfolioDetailResponse;
 import com.portfolio.tracker.portfolio.dto.PortfolioResponse;
 import com.portfolio.tracker.portfolio.dto.PortfolioUpdateRequest;
+import com.portfolio.tracker.shared.exception.BadRequestException;
 import com.portfolio.tracker.shared.exception.ResourceAlreadyExistsException;
+import com.portfolio.tracker.snapshot.PortfolioHistoryChangedEvent;
 import com.portfolio.tracker.shared.exception.ResourceNotFoundException;
 import com.portfolio.tracker.snapshot.PortfolioSnapshotRepository;
 import com.portfolio.tracker.user.User;
 import com.portfolio.tracker.user.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,6 +28,7 @@ public class PortfolioService {
     private final UserRepository userRepository;
     private final PortfolioMapper portfolioMapper;
     private final PortfolioSnapshotRepository snapshotRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     public List<PortfolioResponse> findByUserId(UUID userId) {
         return portfolioRepository.findByUserId(userId).stream()
@@ -66,11 +70,24 @@ public class PortfolioService {
                     "Un portefeuille nommé '" + request.name() + "' existe déjà pour cet utilisateur");
         }
 
+        if (PortfolioRules.holdsOnlyCash(request.type()) && !portfolio.getAssets().isEmpty()) {
+            throw new BadRequestException(
+                    "Ce portefeuille contient des actifs : il ne peut pas devenir un livret");
+        }
+        boolean cashTracking = PortfolioRules.cashTracking(request.type(), request.cashTracking());
+        // Le suivi des liquidités change la valeur de tout l'historique
+        boolean historyChanged = cashTracking != portfolio.isCashTracking();
+
         portfolio.setName(request.name());
         portfolio.setDescription(request.description());
         portfolio.setType(request.type());
+        portfolio.setCashTracking(cashTracking);
+        portfolio.setAnnualInterestRate(request.annualInterestRate());
 
         Portfolio saved = portfolioRepository.save(portfolio);
+        if (historyChanged) {
+            eventPublisher.publishEvent(PortfolioHistoryChangedEvent.full(portfolioId));
+        }
         return portfolioMapper.toResponse(saved);
     }
 

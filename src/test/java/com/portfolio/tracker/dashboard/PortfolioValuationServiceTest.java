@@ -1,6 +1,9 @@
 package com.portfolio.tracker.dashboard;
 
 import com.portfolio.tracker.asset.Asset;
+import com.portfolio.tracker.cash.CashMovement;
+import com.portfolio.tracker.cash.CashMovementRepository;
+import com.portfolio.tracker.cash.CashMovementType;
 import com.portfolio.tracker.asset.AssetType;
 import com.portfolio.tracker.assetprice.AssetPriceRepository;
 import com.portfolio.tracker.assetprice.dto.LatestPriceProjection;
@@ -25,6 +28,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -58,6 +62,9 @@ class PortfolioValuationServiceTest {
     @Mock
     private PortfolioRepository portfolioRepository;
 
+    @Mock
+    private CashMovementRepository cashMovementRepository;
+
     @InjectMocks
     private PortfolioValuationService valuationService;
 
@@ -82,6 +89,9 @@ class PortfolioValuationServiceTest {
 
         lenient()
                 .when(assetPriceRepository.findLatestForSymbolsAsOf(any(), any())).thenReturn(List.of());
+
+        lenient()
+                .when(cashMovementRepository.findAllForValuation(any(), any())).thenReturn(List.of());
 
         userId = UUID.randomUUID();
 
@@ -473,6 +483,98 @@ class PortfolioValuationServiceTest {
             ValuationResult result = valuationService.valuate(userId, null, null);
 
             assertThat(result.getTotalUnrealizedGainPercentage()).isEqualByComparingTo("0.00");
+        }
+    }
+
+    @Nested
+    @DisplayName("Liquidités et livrets")
+    class Liquidites {
+
+        private CashMovement movement(CashMovementType type, String amount, int daysAgo) {
+            return CashMovement.builder()
+                    .portfolio(portfolio)
+                    .type(type)
+                    .amount(new BigDecimal(amount))
+                    .movementDate(LocalDate.now().minusDays(daysAgo))
+                    .build();
+        }
+
+        private void givenMovements(CashMovement... movements) {
+            when(cashMovementRepository.findAllForValuation(any(), any())).thenReturn(List.of(movements));
+        }
+
+        @Test
+        @DisplayName("Livret : valeur = solde, intérêts et versements nets suivis, aucune plus-value latente")
+        void livret() {
+            portfolio.setType(PortfolioType.LIVRET);
+            portfolio.setCashTracking(true);
+            givenTransactions();
+            givenMovements(
+                    movement(CashMovementType.DEPOSIT, "1000", 30),
+                    movement(CashMovementType.INTEREST, "20", 10),
+                    movement(CashMovementType.WITHDRAWAL, "200", 5));
+
+            ValuationResult result = valuationService.valuate(userId, null, null);
+            PortfolioValuation p = result.getPortfolios().get(0);
+
+            assertThat(p.getCurrentValueEur()).isEqualByComparingTo("820.00");
+            assertThat(p.getCashEur()).isEqualByComparingTo("820.00");
+            assertThat(p.getInvestedEur()).isEqualByComparingTo("820.00");
+            assertThat(p.getUnrealizedGainEur()).isEqualByComparingTo("0.00");
+            assertThat(p.getInterestEur()).isEqualByComparingTo("20.00");
+            assertThat(p.getNetDepositsEur()).isEqualByComparingTo("800.00");
+            assertThat(result.getTotalCashEur()).isEqualByComparingTo("820.00");
+        }
+
+        @Test
+        @DisplayName("Compte-titres suivi : l'achat consomme les liquidités, le % latent reste sur le prix de revient")
+        void compteTitresSuivi() {
+            portfolio.setCashTracking(true);
+            givenTransactions(tx(TransactionType.BUY, "10", "100", "5", 10));
+            givenMovements(movement(CashMovementType.DEPOSIT, "5000", 20), movement(CashMovementType.FEE, "3", 2));
+            givenPrice("BTC-USD", "120");
+
+            PortfolioValuation p = valuationService.valuate(userId, null, null).getPortfolios().get(0);
+
+            // 5000 - (1000 + 5 de frais) - 3 de droits de garde
+            assertThat(p.getCashEur()).isEqualByComparingTo("3992.00");
+            assertThat(p.getCurrentValueEur()).isEqualByComparingTo("5192.00");
+            assertThat(p.getInvestedEur()).isEqualByComparingTo("4997.00");
+            assertThat(p.getUnrealizedGainEur()).isEqualByComparingTo("195.00");
+            assertThat(p.getUnrealizedGainPercentage()).isEqualByComparingTo("19.40");
+            assertThat(p.getTotalFeesEur()).isEqualByComparingTo("8.00");
+        }
+
+        @Test
+        @DisplayName("Suivi désactivé : les mouvements sont ignorés, valeur = positions")
+        void suiviDesactive() {
+            givenTransactions(tx(TransactionType.BUY, "10", "100", "0", 10));
+            givenMovements(movement(CashMovementType.DEPOSIT, "5000", 20));
+            givenPrice("BTC-USD", "120");
+
+            PortfolioValuation p = valuationService.valuate(userId, null, null).getPortfolios().get(0);
+
+            assertThat(p.getCashEur()).isEqualByComparingTo("0.00");
+            assertThat(p.getCurrentValueEur()).isEqualByComparingTo("1200.00");
+            assertThat(p.getInvestedEur()).isEqualByComparingTo("1000.00");
+        }
+
+        @Test
+        @DisplayName("Vente et dividende créditent les liquidités")
+        void venteEtDividende() {
+            portfolio.setCashTracking(true);
+            givenTransactions(
+                    tx(TransactionType.BUY, "10", "100", "0", 20),
+                    tx(TransactionType.SELL, "4", "150", "2", 10),
+                    tx(TransactionType.DIVIDEND, "1", "30", "0", 5));
+            givenMovements(movement(CashMovementType.DEPOSIT, "1000", 30));
+            givenPrice("BTC-USD", "150");
+
+            PortfolioValuation p = valuationService.valuate(userId, null, null).getPortfolios().get(0);
+
+            // 1000 - 1000 + (600 - 2) + 30
+            assertThat(p.getCashEur()).isEqualByComparingTo("628.00");
+            assertThat(p.getCurrentValueEur()).isEqualByComparingTo("1528.00");
         }
     }
 

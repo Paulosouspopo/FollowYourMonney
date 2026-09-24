@@ -1,5 +1,7 @@
 package com.portfolio.tracker.dashboard;
 
+import com.portfolio.tracker.portfolio.PortfolioRules;
+import com.portfolio.tracker.portfolio.PortfolioType;
 import com.portfolio.tracker.dashboard.dto.*;
 import com.portfolio.tracker.snapshot.PortfolioSnapshot;
 import com.portfolio.tracker.snapshot.PortfolioSnapshotRepository;
@@ -10,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -129,6 +132,9 @@ public class DashboardService {
                 .realizedGainEur(v.getTotalRealizedGainEur())
                 .dividendsEur(v.getTotalDividendsEur())
                 .totalFeesEur(v.getTotalFeesEur())
+                .interestEur(v.getTotalInterestEur())
+                .cashEur(v.getTotalCashEur())
+                .netDepositsEur(v.getTotalNetDepositsEur())
                 .hasIncompletePrices(v.isHasIncompletePrices())
                 .portfolios(v.getPortfolios())
                 .allocation(buildAllocation(v))
@@ -136,20 +142,32 @@ public class DashboardService {
                 .build();
     }
 
+    /**
+     * Répartition par catégorie : type d'actif pour les positions, LIVRET pour
+     * le solde des livrets, LIQUIDITES pour celui des autres comptes suivis.
+     * Un solde négatif (versements non saisis) n'est pas une part : ignoré.
+     */
     private List<AllocationSliceDTO> buildAllocation(ValuationResult v) {
-        Map<com.portfolio.tracker.asset.AssetType, BigDecimal> byType = v.getPortfolios().stream()
-                .flatMap(p -> p.getPositions().stream())
-                .collect(Collectors.groupingBy(
-                        PositionValuation::getAssetType,
-                        Collectors.reducing(BigDecimal.ZERO, PositionValuation::getCurrentValueEur, BigDecimal::add)));
+        Map<String, BigDecimal> byCategory = new HashMap<>();
+        for (PortfolioValuation p : v.getPortfolios()) {
+            for (PositionValuation position : p.getPositions()) {
+                byCategory.merge(position.getAssetType().name(), position.getCurrentValueEur(), BigDecimal::add);
+            }
+            if (p.getCashEur() != null && p.getCashEur().signum() > 0) {
+                String category = PortfolioRules.holdsOnlyCash(p.getType())
+                        ? PortfolioType.LIVRET.name()
+                        : AllocationSliceDTO.CASH;
+                byCategory.merge(category, p.getCashEur(), BigDecimal::add);
+            }
+        }
 
-        BigDecimal total = byType.values().stream()
+        BigDecimal total = byCategory.values().stream()
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        return byType.entrySet().stream()
+        return byCategory.entrySet().stream()
+                .filter(e -> e.getValue().signum() > 0)
                 .map(e -> AllocationSliceDTO.builder()
-                        .assetType(e.getKey())
-                        .label(e.getKey().name())
+                        .category(e.getKey())
                         .value(e.getValue().setScale(MoneyConstants.MONEY_SCALE, MoneyConstants.ROUNDING))
                         .percentage(total.signum() == 0
                                 ? BigDecimal.ZERO

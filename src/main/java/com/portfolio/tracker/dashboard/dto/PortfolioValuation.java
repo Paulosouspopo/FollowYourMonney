@@ -8,7 +8,13 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 
-/** Valorisation d'un portefeuille. Montants en EUR. */
+/**
+ * Valorisation d'un portefeuille. Montants en EUR.
+ *
+ * Avec le suivi des liquidités, le solde entre dans la valeur ET dans
+ * l'investi (argent engagé sur le compte) : la plus-value latente reste celle
+ * des positions, et son pourcentage est calculé sur leur seul prix de revient.
+ */
 @Getter
 @Builder
 public class PortfolioValuation {
@@ -17,19 +23,33 @@ public class PortfolioValuation {
     private String name;
     private PortfolioType type;
 
+    /** Positions + liquidités (si suivies). */
     private BigDecimal currentValueEur;
+    /** Prix de revient des positions + liquidités (si suivies). */
     private BigDecimal investedEur;
     private BigDecimal unrealizedGainEur;
+    /** Plus-value latente / prix de revient des positions (hors liquidités). */
     private BigDecimal unrealizedGainPercentage;
     private BigDecimal realizedGainEur;
     private BigDecimal dividendsEur;
+    /** Intérêts crédités (livret, rémunération des espèces). */
+    private BigDecimal interestEur;
+    /** Frais de courtage + frais de tenue de compte. */
     private BigDecimal totalFeesEur;
+
+    private boolean cashTracking;
+    /** Solde de liquidités (0 si non suivi). Peut être négatif. */
+    private BigDecimal cashEur;
+    /** Versements - retraits : argent apporté de l'extérieur. */
+    private BigDecimal netDepositsEur;
+    /** Taux affiché d'un livret, en %. */
+    private BigDecimal annualInterestRate;
 
     private List<PositionValuation> positions;
 
     /** Nombre de positions encore ouvertes. */
     private int openPositionCount;
 
-    /** true si au moins un prix manquait. */
+    /** true si au moins un cours de marché manquait (position estimée). */
     private boolean hasIncompletePrices;
 }

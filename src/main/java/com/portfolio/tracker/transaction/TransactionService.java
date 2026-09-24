@@ -10,7 +10,9 @@ import com.portfolio.tracker.marketdata.MarketQuote;
 import com.portfolio.tracker.marketdata.yahoo.YahooFinanceClient;
 import com.portfolio.tracker.portfolio.Portfolio;
 import com.portfolio.tracker.portfolio.PortfolioRepository;
+import com.portfolio.tracker.portfolio.PortfolioRules;
 import com.portfolio.tracker.shared.MoneyConstants;
+import com.portfolio.tracker.shared.exception.BadRequestException;
 import com.portfolio.tracker.shared.exception.ResourceNotFoundException;
 import com.portfolio.tracker.snapshot.PortfolioHistoryChangedEvent;
 import com.portfolio.tracker.transaction.dto.TransactionCreateRequest;
@@ -85,6 +87,10 @@ public class TransactionService {
                 // Vérifier que le Portfolio appartient à l'utilisateur
                 Portfolio portfolio = portfolioRepository.findByIdAndUserId(portfolioId, userId)
                                 .orElseThrow(() -> new ResourceNotFoundException("Portfolio non accessible"));
+                if (PortfolioRules.holdsOnlyCash(portfolio.getType())) {
+                        throw new BadRequestException(
+                                        "Un livret ne détient pas d'actifs : saisis des versements, retraits ou intérêts");
+                }
 
                 String symbol = request.symbol().trim().toUpperCase();
 
