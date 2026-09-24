@@ -1,18 +1,15 @@
 package com.portfolio.tracker.imports;
 
-import com.portfolio.tracker.assetprice.PriceHistoryService;
-import com.portfolio.tracker.assetprice.dto.DailyPrice;
+import com.portfolio.tracker.assetprice.MarketPriceLookup;
 import com.portfolio.tracker.cash.CashMovement;
 import com.portfolio.tracker.cash.CashMovementRepository;
 import com.portfolio.tracker.cash.CashMovementService;
 import com.portfolio.tracker.cash.dto.CashMovementRequest;
-import com.portfolio.tracker.exchangerate.ExchangeRateService;
 import com.portfolio.tracker.imports.csv.CsvReader;
 import com.portfolio.tracker.imports.csv.CsvTable;
 import com.portfolio.tracker.imports.dto.*;
 import com.portfolio.tracker.imports.parser.GenericParser;
 import com.portfolio.tracker.imports.parser.StatementParser;
-import com.portfolio.tracker.marketdata.MarketDataProvider;
 import com.portfolio.tracker.portfolio.Portfolio;
 import com.portfolio.tracker.portfolio.PortfolioRepository;
 import com.portfolio.tracker.portfolio.PortfolioRules;
@@ -57,6 +54,10 @@ public class ImportService {
 
     private static final int SAMPLE_ROWS = 5;
     private static final int MAX_DISTINCT_VALUES = 20;
+    /** Référence des transactions générées par un investissement programmé. */
+    private static final String PLAN_REF_PREFIX = "PLAN:";
+    /** Un courtier exécute une échéance jusqu'à quelques jours après la date prévue. */
+    private static final int PLAN_MATCH_DAYS = 4;
 
     private final List<StatementParser> parsers;
     private final GenericParser genericParser;
@@ -67,9 +68,7 @@ public class ImportService {
     private final CashMovementRepository cashMovementRepository;
     private final TransactionService transactionService;
     private final CashMovementService cashMovementService;
-    private final PriceHistoryService priceHistoryService;
-    private final ExchangeRateService exchangeRateService;
-    private final MarketDataProvider marketDataProvider;
+    private final MarketPriceLookup marketPriceLookup;
     private final ApplicationEventPublisher eventPublisher;
 
     // ================================================================= lecture
@@ -283,27 +282,11 @@ public class ImportService {
      */
     private Optional<BigDecimal> estimateUnitPrice(String valuationSymbol, BigDecimal valuationQuantity,
                                                    BigDecimal quantity, LocalDate day) {
-        if (valuationSymbol == null || valuationQuantity == null || quantity == null || quantity.signum() == 0) {
+        if (valuationQuantity == null || quantity == null || quantity.signum() == 0) {
             return Optional.empty();
         }
-        try {
-            Optional<DailyPrice> close;
-            if (day.isBefore(LocalDate.now())) {
-                priceHistoryService.ensureCoverage(valuationSymbol, day);
-                close = priceHistoryService.findOnOrBefore(valuationSymbol, day);
-            } else {
-                close = marketDataProvider.getQuote(valuationSymbol)
-                        .map(q -> new DailyPrice(q.marketDate(), q.price(), q.currency()));
-            }
-            return close.map(p -> {
-                BigDecimal rate = exchangeRateService.getRateAsOf(p.currency(), MoneyConstants.BASE_CURRENCY, day);
-                BigDecimal valueEur = valuationQuantity.multiply(p.price()).multiply(rate);
-                return valueEur.divide(quantity, 8, RoundingMode.HALF_UP);
-            }).filter(price -> price.signum() > 0);
-        } catch (RuntimeException e) {
-            log.warn("Estimation de {} au {} impossible : {}", valuationSymbol, day, e.getMessage());
-            return Optional.empty();
-        }
+        return marketPriceLookup.priceInEur(valuationSymbol, day)
+                .map(price -> valuationQuantity.multiply(price).divide(quantity, 8, RoundingMode.HALF_UP));
     }
 
     /**
@@ -317,7 +300,12 @@ public class ImportService {
         List<CashMovement> existingMovements = cashMovementRepository.findByPortfolioIdAndUserId(portfolio.getId(), userId);
         Set<String> refs = new HashSet<>();
         Set<String> keys = new HashSet<>();
+        // Achats générés par un investissement programmé : symbole|jour
+        Set<String> planBuys = new HashSet<>();
         existingTxs.forEach(t -> {
+            if (t.getExternalRef() != null && t.getExternalRef().startsWith(PLAN_REF_PREFIX)) {
+                planBuys.add(t.getAsset().getSymbol().toUpperCase() + "|" + t.getTransactionDate().toLocalDate());
+            }
             if (t.getExternalRef() != null) {
                 refs.add(t.getExternalRef());
             }
@@ -349,6 +337,19 @@ public class ImportService {
             if (key != null && keys.contains(key)) {
                 op.setStatus(RowStatus.DUPLICATE);
                 op.setMessage("Une opération identique existe déjà (même jour, même montant)");
+                continue;
+            }
+            // Le relevé contient l'exécution réelle d'un achat déjà créé (prix estimé) par un plan
+            if (op.getKind() == ImportKind.BUY) {
+                String symbol = Optional.ofNullable(assets.get(op.getAsset().reference()))
+                        .map(AssetResolutionDto::suggestion).map(sug -> sug.symbol().toUpperCase()).orElse(null);
+                LocalDate day = op.getDateTime().toLocalDate();
+                boolean fromPlan = symbol != null && IntStream.rangeClosed(-PLAN_MATCH_DAYS, PLAN_MATCH_DAYS)
+                        .anyMatch(d -> planBuys.contains(symbol + "|" + day.plusDays(d)));
+                if (fromPlan) {
+                    op.setStatus(RowStatus.DUPLICATE);
+                    op.setMessage("Déjà créé par ton investissement programmé (prix estimé) : coche pour l'importer quand même");
+                }
             }
         }
     }

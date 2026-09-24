@@ -1,7 +1,6 @@
 package com.portfolio.tracker.asset;
 
 import com.portfolio.tracker.portfolio.Portfolio;
-import com.portfolio.tracker.recurringinvestment.RecurringInvestment;
 import com.portfolio.tracker.transaction.Transaction;
 import jakarta.persistence.*;
 import lombok.*;
@@ -58,9 +57,6 @@ public class Asset {
 
     @OneToMany(mappedBy = "asset", cascade = CascadeType.ALL)
     private List<Transaction> transactions;
-
-    @OneToMany(mappedBy = "asset", cascade = CascadeType.ALL)
-    private List<RecurringInvestment> recurringInvestments;
 
     @CreationTimestamp
     private LocalDateTime createdAt;

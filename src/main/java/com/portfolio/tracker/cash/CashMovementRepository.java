@@ -39,4 +39,6 @@ public interface CashMovementRepository extends JpaRepository<CashMovement, UUID
             ORDER BY m.movementDate ASC, m.createdAt ASC
             """)
     List<CashMovement> findAllByPortfolioIdForHistory(@Param("portfolioId") UUID portfolioId);
+
+    boolean existsByExternalRef(String externalRef);
 }

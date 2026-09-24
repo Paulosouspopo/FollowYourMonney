@@ -144,12 +144,30 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
   réels de l'utilisateur sont dans `examples-imports/` : gitignoré, ne JAMAIS
   les commiter ni en recopier le contenu.
 
+## Investissements programmés (`plan/`)
+- `InvestmentPlan` : BUY (achat d'un actif, pas sur un livret) ou DEPOSIT
+  (versement, compte avec suivi des liquidités). Montant par échéance en
+  EUR frais compris, fréquence (`PlanFrequency`, n-ième échéance calculée
+  depuis la date de début), date de fin, parts entières ou fractionnées, pause.
+- `PlanExecutor` : chaque échéance échue → transaction (cours de clôture du
+  jour via `MarketPriceLookup`, prix estimé) ou versement, référence
+  `PLAN:<id>:<date>` (idempotent). Un plan par transaction sous verrou ;
+  un échec annule le passage et est noté dans `lastError` (retenté le soir).
+  Parts entières : échéance sautée si le montant ne suffit pas.
+- `PlanJobs` : au démarrage + 21h30. Création/modification → exécution
+  immédiate des échéances passées (un plan démarré dans le passé recrée son
+  historique). Reprise après pause : la période de pause n'est pas rattrapée.
+- Après la 1re échéance : type, actif, fréquence et début figés (400).
+- Import : un achat du relevé à ±4 jours d'une échéance de plan sur le même
+  actif est proposé comme doublon (l'exécution réelle du courtier).
+
 ## Dev local : antivirus Avast
 - Avast (« Web/Mail Shield », analyse HTTPS) re-signe tout le trafic HTTPS :
   Java refuse alors Yahoo (`PKIX path building failed`), git et Docker aussi.
 - Contournement : lancer la JVM avec
   `-Djavax.net.ssl.trustStoreType=Windows-ROOT` (magasin de certificats
-  Windows), git avec `http.sslBackend=schannel` ; ou désactiver l'analyse
+  Windows ; dans VS Code : `java.debug.settings.vmArgs` du `.vscode/settings.json`
+  local), git avec `http.sslBackend=schannel` ; ou désactiver l'analyse
   HTTPS d'Avast.
 
 ## Sécurité

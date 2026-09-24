@@ -9,6 +9,10 @@ import com.portfolio.tracker.imports.dto.AssetResolutionDto.Confidence;
 import com.portfolio.tracker.marketdata.AssetSearchResult;
 import com.portfolio.tracker.marketdata.MarketPricePoint;
 import com.portfolio.tracker.marketdata.MarketQuote;
+import com.portfolio.tracker.plan.InvestmentPlan;
+import com.portfolio.tracker.plan.PlanFrequency;
+import com.portfolio.tracker.plan.PlanService;
+import com.portfolio.tracker.plan.dto.PlanRequest;
 import com.portfolio.tracker.portfolio.Portfolio;
 import com.portfolio.tracker.portfolio.PortfolioRepository;
 import com.portfolio.tracker.portfolio.PortfolioType;
@@ -47,6 +51,7 @@ class ImportFlowTest extends AbstractIntegrationTest {
     @Autowired private PortfolioRepository portfolioRepository;
     @Autowired private TransactionRepository transactionRepository;
     @Autowired private UserRepository userRepository;
+    @Autowired private PlanService planService;
 
     private UUID userId;
     private User user;
@@ -73,12 +78,17 @@ class ImportFlowTest extends AbstractIntegrationTest {
         // Historique : USDT à 0,95 € chaque jour (sert à estimer la conversion USDT → ETH)
         when(marketDataProvider.getDailyHistory(anyString(), any(), any())).thenAnswer(inv -> {
             String symbol = inv.getArgument(0);
-            if (!symbol.equals("USDT-EUR")) {
+            BigDecimal close = switch (symbol) {
+                case "USDT-EUR" -> new BigDecimal("0.95");
+                case "FAKE" -> new BigDecimal("100");
+                default -> null;
+            };
+            if (close == null) {
                 return List.of();
             }
             List<MarketPricePoint> points = new ArrayList<>();
             for (LocalDate d = inv.getArgument(1); !d.isAfter(inv.getArgument(2)); d = d.plusDays(1)) {
-                points.add(new MarketPricePoint(symbol, new BigDecimal("0.95"), "EUR", d, d.atTime(15, 30)));
+                points.add(new MarketPricePoint(symbol, close, "EUR", d, d.atTime(15, 30)));
             }
             return points;
         });
@@ -171,6 +181,23 @@ class ImportFlowTest extends AbstractIntegrationTest {
                 fixture("trade-republic.csv"));
         assertThat(preview.rows()).filteredOn(r -> r.kind() != null && r.kind().isTrade() && r.status() != RowStatus.IGNORED)
                 .allMatch(r -> r.status() == RowStatus.ERROR);
+    }
+
+    @Test
+    @DisplayName("Achat déjà créé par un investissement programmé : proposé comme doublon")
+    void doublonDePlan() throws IOException {
+        UUID portfolioId = portfolio("CTO", PortfolioType.CTO);
+        // Plan mensuel dont une échéance tombe 2 jours après l'achat du relevé (10/01/2026)
+        planService.create(portfolioId, new PlanRequest(InvestmentPlan.Type.BUY, "FAKE", new BigDecimal("200"), null,
+                PlanFrequency.MONTHLY, LocalDate.of(2026, 1, 12), LocalDate.of(2026, 1, 31), true, true), userId);
+
+        ImportPreview preview = importService.preview(userId, new PreviewOptions(portfolioId, null, null),
+                fixture("trade-republic.csv"));
+        ImportRowDto buy = preview.rows().stream()
+                .filter(r -> r.kind() == ImportKind.BUY && "ISIN:US0000000001".equals(r.assetReference()))
+                .findFirst().orElseThrow();
+        assertThat(buy.status()).isEqualTo(RowStatus.DUPLICATE);
+        assertThat(buy.message()).contains("investissement programmé");
     }
 
     // ------------------------------------------------------------------ utils
