@@ -13,6 +13,7 @@ public record PortfolioResponse(
         PortfolioType type,
         boolean cashTracking,
         BigDecimal annualInterestRate,
+        java.time.LocalDate openedAt,
         UUID userId,
         LocalDateTime createdAt,
         LocalDateTime updatedAt

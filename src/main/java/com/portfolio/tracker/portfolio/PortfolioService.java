@@ -83,6 +83,7 @@ public class PortfolioService {
         portfolio.setType(request.type());
         portfolio.setCashTracking(cashTracking);
         portfolio.setAnnualInterestRate(request.annualInterestRate());
+        portfolio.setOpenedAt(request.openedAt());
 
         Portfolio saved = portfolioRepository.save(portfolio);
         if (historyChanged) {

@@ -46,6 +46,10 @@ public class Portfolio {
     @Builder.Default
     private boolean cashTracking = false;
 
+    /** Date d'ouverture du compte (PEA : point de départ des 5 ans). Null = première opération. */
+    @Column(name = "opened_at")
+    private java.time.LocalDate openedAt;
+
     /** Taux annuel affiché d'un livret, en % (informatif). */
     @Column(name = "annual_interest_rate", precision = 6, scale = 3)
     private BigDecimal annualInterestRate;

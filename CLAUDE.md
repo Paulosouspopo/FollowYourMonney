@@ -255,6 +255,25 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
   `/api/goals` renvoie valeur actuelle du périmètre + versements programmés
   mensuels ; la projection (intérêts composés, délai, effort) est côté front.
 
+## Remplacer l'actif d'une ligne
+- `POST /api/portfolios/{id}/assets/{assetId}/replace {symbol}`
+  (`AssetReplacementService`) : opérations conservées, symbole / nom /
+  devise / type mis à jour ; fusion si le nouvel actif est déjà dans le
+  portefeuille (refusée si une vente dépassait la quantité détenue) ; plans et
+  mémoire d'import suivent ; historique recalculé.
+
+## Fiscalité (`tax/`)
+- `TaxEngine` (pur, testé) : titres hors PEA au PMP par symbole tous comptes
+  (même règle que `PositionState`), report des moins-values sur 10 ans ;
+  crypto 150 VH bis (gain = C - PTA × C / V, V = portefeuille crypto global au
+  jour de la vente, cours en mémoire) ; échanges crypto contre crypto
+  (vente + achat du même compte à ≤ 2 min, montants à ±5 %) non imposables et
+  sans effet sur le PTA ; franchise de 305 €.
+- `/api/tax?year=` (défaut : année écoulée) : cessions, dividendes, cases
+  3VG/3VH, 2DC, 3AN/3BN, flat tax 30 %, PEA (5 ans depuis `opened_at` (V11)
+  ou la 1re opération, plafond 150 000 €, versements estimés sans suivi des
+  liquidités, 17,2 % en cas de retrait). Estimation : l'IFU fait foi.
+
 ## Dev local : antivirus Avast
 - Avast (« Web/Mail Shield », analyse HTTPS) re-signe tout le trafic HTTPS :
   Java refuse alors Yahoo (`PKIX path building failed`), git et Docker aussi.
