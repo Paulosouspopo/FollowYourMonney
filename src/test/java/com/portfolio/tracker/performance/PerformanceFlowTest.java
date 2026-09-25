@@ -171,6 +171,21 @@ class PerformanceFlowTest extends AbstractIntegrationTest {
         assertThat(usd.getTotalValueEur()).isEqualByComparingTo("1100"); // les totaux restent en EUR
     }
 
+    @Test
+    @DisplayName("Tuiles : tendance 30 jours par portefeuille, variation de plus-value (pas des versements)")
+    void tendanceDesTuiles() {
+        UUID pf = portfolio("PEA", false);
+        buy(pf, 10, 5);
+
+        DashboardResponse d = dashboardService.getDashboard(user.getId(), "30d", null);
+        assertThat(d.getTrends()).singleElement().satisfies(t -> {
+            assertThat(t.portfolioId()).isEqualTo(pf);
+            assertThat(t.values()).hasSize(6).last().satisfies(v -> assertThat(v).isEqualByComparingTo("1100"));
+            assertThat(t.changeEur()).isEqualByComparingTo("100"); // 1000 € investis, +10 % du cours : l'achat n'est pas un gain
+            assertThat(t.changePct()).isEqualByComparingTo("10");
+        });
+    }
+
     private UUID portfolio(String name, boolean cashTracking) {
         return portfolioRepository.save(Portfolio.builder().name(name)
                 .type(name.equals("PEA") ? PortfolioType.PEA : PortfolioType.CTO)

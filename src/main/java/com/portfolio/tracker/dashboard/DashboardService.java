@@ -45,7 +45,37 @@ public class DashboardService {
         ValuationResult valuation = valuationService.valuate(userId, null, null);
         List<CurvePointDTO> curve = convertCurve(buildCurveForUser(userId, period), currency);
 
-        return toResponse(valuation, curve, currency);
+        DashboardResponse response = toResponse(valuation, curve, currency);
+        response.setTrends(trends(userId));
+        return response;
+    }
+
+    /** Jours de la tendance affichée sur les tuiles de portefeuille. */
+    private static final int TREND_DAYS = 30;
+
+    /**
+     * Tendance de chaque portefeuille sur 30 jours, en une seule requête :
+     * valeurs quotidiennes et variation de plus-value (neutre vis-à-vis des
+     * versements, comme l'en-tête du dashboard).
+     */
+    private List<PortfolioTrend> trends(UUID userId) {
+        List<PortfolioSnapshot> snapshots = snapshotRepository.findByUserIdAndSnapshotDateGreaterThanEqual(
+                userId, LocalDate.now().minusDays(TREND_DAYS));
+        Map<UUID, List<PortfolioSnapshot>> byPortfolio = snapshots.stream()
+                .collect(Collectors.groupingBy(s -> s.getPortfolio().getId(), java.util.LinkedHashMap::new,
+                        Collectors.toList()));
+        return byPortfolio.entrySet().stream().map(e -> {
+            List<PortfolioSnapshot> days = e.getValue(); // déjà triés par date
+            PortfolioSnapshot first = days.get(0);
+            PortfolioSnapshot last = days.get(days.size() - 1);
+            BigDecimal change = last.getGainLoss().subtract(first.getGainLoss());
+            BigDecimal pct = first.getTotalValue().signum() > 0
+                    ? change.multiply(BigDecimal.valueOf(100))
+                            .divide(first.getTotalValue(), MoneyConstants.PERCENT_SCALE, MoneyConstants.ROUNDING)
+                    : null;
+            return new PortfolioTrend(e.getKey(), days.stream().map(PortfolioSnapshot::getTotalValue).toList(),
+                    change, pct);
+        }).toList();
     }
 
     /**
