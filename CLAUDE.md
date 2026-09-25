@@ -316,6 +316,32 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
   case : l'IFU de l'assureur fait foi), épargne salariale (abondement, 17,2 %).
 - Répartition : catégorie `FONDS_EUROS` pour le solde d'une AV ou d'un PER.
 
+## Radiographie (`analysis/`, V14)
+- Profil de marché d'un actif (`MarketDataProvider.getProfile`) : Yahoo
+  `quoteSummary` (modules assetProfile, topHoldings, fundProfile, quoteType)
+  via `YahooQuoteSummaryClient` : cet endpoint exige un cookie (fc.yahoo.com)
+  et un « crumb » (`/v1/test/getcrumb`), renouvelés sur 401/403. Action : pays
+  et secteur. ETF / fonds : secteurs, 10 premières lignes (souvent absentes
+  pour les ETF européens), répartition actions/obligations, frais (TER).
+  Yahoo ne donne JAMAIS les pays d'un ETF.
+- `AssetProfileService` : cache `asset_profiles` (30 jours, 1 jour après un
+  échec), réseau hors transaction ; actifs non cotés et cryptos exclus.
+- `ExposureCalculator` (pur, testé) : classes d'actifs (fonds décomposés),
+  pays et secteurs sur la partie actions, devises économiques (pays → devise),
+  expositions réelles (actions en direct + lignes des fonds), concentration,
+  frais (TER Yahoo ou saisi `assets.annual_fee_pct`, coût sur 20 ans à 5 %).
+  Pays d'un ETF estimés d'après l'indice cité dans son nom (`Geography`,
+  répartition approximative des grands indices ; « non déterminé » sinon).
+- `ContributionService` : gain de chaque ligne sur une période = valeur finale
+  − valeur la veille du début − flux (achats − ventes − dividendes nets), cours
+  et taux lus en base (aucun appel réseau).
+- `RiskCalculator` (pur, testé), dans `/api/performance` (`risk`) :
+  volatilité (jours ouvrés, √252), pire baisse et dates, Sharpe (> 1 an, sans
+  risque 2 %), meilleur / pire jour ; null sous 20 jours ouvrés.
+- API : `GET /api/analysis/exposure?portfolioId=`,
+  `GET /api/analysis/contributions?period=&portfolioId=`,
+  `PUT /api/analysis/fees {symbol, annualFeePct}` (toutes les lignes du symbole).
+
 ## Tutoriels (`tutorial/`)
 - `tutorial_states` (V12) : une ligne par compte, `auto_enabled` + clés des
   visites terminées (CSV, clés `[a-z0-9-]{1,40}`, 40 max). Les clés sont

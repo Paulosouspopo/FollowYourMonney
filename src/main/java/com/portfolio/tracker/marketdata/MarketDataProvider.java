@@ -31,4 +31,12 @@ public interface MarketDataProvider {
     default List<DividendEvent> getDividends(String symbol, LocalDate from, LocalDate to) {
         return List.of();
     }
+
+    /**
+     * Profil de l'actif (pays, secteur, répartition d'un fonds, frais). Vide
+     * par défaut ou si le fournisseur ne le connaît pas ; ne lève jamais.
+     */
+    default java.util.Optional<AssetProfile> getProfile(String symbol) {
+        return java.util.Optional.empty();
+    }
 }

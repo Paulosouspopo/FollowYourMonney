@@ -107,7 +107,7 @@ public class PerformanceService {
                 money(total.startValue()), money(total.endValue()), money(total.netFlows()), money(total.gain()),
                 pct(total.twr()), days >= 365 ? pct(annualize(total.twr(), days)) : null,
                 pct(total.mwr()), days >= 365 && total.xirr() != null ? pct(total.xirr()) : null,
-                benchmarkInfo, series, breakdown);
+                benchmarkInfo, series, breakdown, RiskCalculator.compute(dates, total.twrCumulative()));
     }
 
     // ----------------------------------------------------------------- lecture

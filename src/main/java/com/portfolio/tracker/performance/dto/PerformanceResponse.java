@@ -18,6 +18,7 @@ import java.util.UUID;
  * @param benchmark        indice de comparaison (null si non demandé ou introuvable)
  * @param series           un point par jour : valeur et TWR cumulé, indice rebasé à 0 %
  * @param portfolios       détail par portefeuille (vue globale uniquement), même période
+ * @param risk             volatilité, pire baisse, Sharpe… (null sous 20 jours ouvrés)
  */
 public record PerformanceResponse(
         String period,
@@ -33,7 +34,8 @@ public record PerformanceResponse(
         BigDecimal xirrPct,
         Benchmark benchmark,
         List<Point> series,
-        List<PortfolioPerformance> portfolios
+        List<PortfolioPerformance> portfolios,
+        com.portfolio.tracker.performance.RiskCalculator.Risk risk
 ) {
     public record Point(LocalDate date, BigDecimal valueEur, BigDecimal twrPct, BigDecimal benchmarkPct) {
     }

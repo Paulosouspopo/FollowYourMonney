@@ -46,13 +46,22 @@ public class YahooFinanceClient implements MarketDataProvider {
     private static final BigDecimal MINOR_UNIT_DIVISOR = BigDecimal.valueOf(100);
 
     private final RestClient restClient;
+    private final YahooQuoteSummaryClient quoteSummary;
 
     public YahooFinanceClient(@Value("${app.yahoo.base-url}") String baseUrl,
-            @Value("${app.yahoo.user-agent}") String userAgent) {
+            @Value("${app.yahoo.user-agent}") String userAgent, YahooQuoteSummaryClient quoteSummary) {
+        this.quoteSummary = quoteSummary;
         this.restClient = RestClient.builder()
                 .baseUrl(baseUrl)
                 .defaultHeader("User-Agent", userAgent)
                 .build();
+    }
+
+    // ---------------------------------------------------------------- profil
+
+    @Override
+    public Optional<com.portfolio.tracker.marketdata.AssetProfile> getProfile(String symbol) {
+        return ManualAssets.isManual(symbol) ? Optional.empty() : quoteSummary.profile(symbol);
     }
 
     // ------------------------------------------------------------------ quote
