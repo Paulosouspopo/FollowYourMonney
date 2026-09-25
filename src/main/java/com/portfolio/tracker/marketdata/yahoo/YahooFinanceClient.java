@@ -95,6 +95,37 @@ public class YahooFinanceClient implements MarketDataProvider {
                 .toList();
     }
 
+    // -------------------------------------------------------------- dividends
+
+    @Override
+    public List<com.portfolio.tracker.marketdata.DividendEvent> getDividends(String symbol, LocalDate from, LocalDate to) {
+        long period1 = from.atStartOfDay(ZoneOffset.UTC).toEpochSecond();
+        long period2 = to.plusDays(1).atStartOfDay(ZoneOffset.UTC).toEpochSecond();
+        YahooChartResponse response;
+        try {
+            // Intervalle mensuel : on ne veut que les événements, pas les cours
+            response = restClient.get()
+                    .uri("/v8/finance/chart/{symbol}?period1={p1}&period2={p2}&interval=1mo&events=div",
+                            symbol, period1, period2)
+                    .retrieve()
+                    .body(YahooChartResponse.class);
+        } catch (Exception e) {
+            throw new MarketDataUnavailableException("Yahoo dividends failed for " + symbol + ": " + e.getMessage(), e);
+        }
+        return firstResult(symbol, response)
+                .filter(r -> r.events() != null && r.events().dividends() != null)
+                .map(r -> r.events().dividends().values().stream()
+                        .filter(d -> d.amount() != null && d.amount() > 0 && d.date() != null)
+                        .map(d -> new com.portfolio.tracker.marketdata.DividendEvent(symbol,
+                                java.time.Instant.ofEpochSecond(d.date()).atZone(ZoneOffset.UTC).toLocalDate(),
+                                java.math.BigDecimal.valueOf(d.amount()),
+                                r.meta() != null ? r.meta().currency() : null))
+                        .filter(d -> !d.exDate().isBefore(from) && !d.exDate().isAfter(to))
+                        .sorted(java.util.Comparator.comparing(com.portfolio.tracker.marketdata.DividendEvent::exDate))
+                        .toList())
+                .orElse(List.of());
+    }
+
     // ----------------------------------------------------------------- search
 
     @Override
