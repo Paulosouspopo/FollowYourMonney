@@ -54,7 +54,7 @@ class DemoFlowTest extends AbstractIntegrationTest {
             return points;
         });
 
-        AuthService.Session session = demoService.start();
+        AuthService.Session session = demoService.start(AuthService.Device.UNKNOWN);
         assertThat(session.accessToken()).isNotBlank();
         User demo = userRepository.findAll().stream().filter(User::isDemo).findFirst().orElseThrow();
         assertThat(demo.getEmail()).endsWith("@demo.invalid");

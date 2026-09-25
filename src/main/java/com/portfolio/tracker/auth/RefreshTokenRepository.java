@@ -20,6 +20,13 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, UUID
     int revokeAllForUser(@Param("userId") UUID userId, @Param("now") LocalDateTime now);
 
     @Modifying
+    /** Sessions en cours (ni révoquées ni expirées), plus récemment utilisées d'abord. */
+    @Query("""
+            SELECT t FROM RefreshToken t WHERE t.user.id = :userId AND t.revokedAt IS NULL AND t.expiresAt > :now
+            ORDER BY t.lastUsedAt DESC NULLS LAST
+            """)
+    java.util.List<RefreshToken> findActive(@Param("userId") UUID userId, @Param("now") LocalDateTime now);
+
     @Query("DELETE FROM RefreshToken t WHERE t.expiresAt < :now")
     int deleteExpired(@Param("now") LocalDateTime now);
 }

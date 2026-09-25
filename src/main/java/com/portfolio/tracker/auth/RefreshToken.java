@@ -40,6 +40,19 @@ public class RefreshToken {
     @Column(name = "revoked_at")
     private LocalDateTime revokedAt;
 
+    /** Début de la session sur cet appareil (conservé d'une rotation à l'autre). */
+    @Column(name = "session_started_at")
+    private LocalDateTime sessionStartedAt;
+
+    @Column(name = "last_used_at")
+    private LocalDateTime lastUsedAt;
+
+    @Column(name = "user_agent")
+    private String userAgent;
+
+    @Column(length = 64)
+    private String ip;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;

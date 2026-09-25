@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -52,6 +53,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final AccountEmails accountEmails;
     private final Duration refreshValidity;
+    private final com.portfolio.tracker.auth.twofactor.TwoFactorService twoFactorService;
 
     public AuthService(AuthenticationManager authenticationManager,
             UserRepository userRepository,
@@ -61,7 +63,9 @@ public class AuthService {
             AccountTokenRepository accountTokenRepository,
             PasswordEncoder passwordEncoder,
             AccountEmails accountEmails,
+            com.portfolio.tracker.auth.twofactor.TwoFactorService twoFactorService,
             @Value("${app.auth.refresh-token-days:30}") long refreshTokenDays) {
+        this.twoFactorService = twoFactorService;
         this.authenticationManager = authenticationManager;
         this.userRepository = userRepository;
         this.userService = userService;
@@ -75,6 +79,20 @@ public class AuthService {
 
     /** Session ouverte : le JWT va dans le corps, le jeton brut de renouvellement dans le cookie. */
     public record Session(String accessToken, long expiresInSeconds, String refreshToken, Duration refreshValidity) {
+    }
+
+    /** Appareil à l'origine d'une session (liste des sessions actives). */
+    public record Device(String userAgent, String ip) {
+        public static final Device UNKNOWN = new Device(null, null);
+    }
+
+    /** Connexion : une session, ou un défi de double authentification (jeton de 5 minutes). */
+    public record LoginOutcome(Session session, String twoFactorToken) {
+    }
+
+    /** Session en cours sur un appareil. */
+    public record SessionInfo(UUID id, String userAgent, String ip, LocalDateTime startedAt, LocalDateTime lastUsedAt,
+                              boolean current) {
     }
 
     // ============================================================ inscription
@@ -108,6 +126,19 @@ public class AuthService {
     /** Les exceptions d'échec ne doivent pas annuler les révocations déjà faites. */
     @Transactional(noRollbackFor = AuthenticationFailedException.class)
     public Session login(String email, String password) {
+        LoginOutcome outcome = login(email, password, Device.UNKNOWN);
+        if (outcome.session() == null) {
+            throw new AuthenticationFailedException("Double authentification requise");
+        }
+        return outcome.session();
+    }
+
+    /**
+     * Mot de passe vérifié : session ouverte, ou défi si la double
+     * authentification est active (le code se vérifie avec {@link #verifyTwoFactor}).
+     */
+    @Transactional(noRollbackFor = AuthenticationFailedException.class)
+    public LoginOutcome login(String email, String password, Device device) {
         // BadCredentialsException (→ 401) si email inconnu ou mot de passe faux,
         // sans distinguer les deux cas.
         authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(email, password));
@@ -115,11 +146,57 @@ public class AuthService {
         if (!user.isEmailVerified()) {
             throw new EmailNotVerifiedException();
         }
-        return openSession(user);
+        if (user.isTotpEnabled()) {
+            return new LoginOutcome(null, issue(user, AccountTokenType.TWO_FACTOR));
+        }
+        return new LoginOutcome(openSession(user, device, null), null);
+    }
+
+    /** Second facteur : code de l'application ou code de secours. Le défi reste valable en cas d'erreur (5 min). */
+    @Transactional(noRollbackFor = AuthenticationFailedException.class)
+    public Session verifyTwoFactor(String rawToken, String code, Device device) {
+        LocalDateTime now = LocalDateTime.now();
+        AccountToken token = accountTokenRepository.findByTokenHashAndType(SecureTokens.hash(rawToken == null ? "" : rawToken),
+                        AccountTokenType.TWO_FACTOR)
+                .filter(t -> t.isUsable(now))
+                .orElseThrow(() -> new AuthenticationFailedException("Délai dépassé : reconnecte-toi."));
+        if (!twoFactorService.check(token.getUser(), code)) {
+            throw new AuthenticationFailedException("Code incorrect");
+        }
+        token.setUsedAt(now);
+        return openSession(token.getUser(), device, null);
+    }
+
+    /** Sessions en cours de l'utilisateur ; `current` : celle du cookie présenté. */
+    @Transactional(readOnly = true)
+    public List<SessionInfo> sessions(UUID userId, String rawCurrentToken) {
+        String currentHash = rawCurrentToken == null || rawCurrentToken.isBlank() ? null : SecureTokens.hash(rawCurrentToken);
+        return refreshTokenRepository.findActive(userId, LocalDateTime.now()).stream()
+                .map(t -> new SessionInfo(t.getId(), t.getUserAgent(), t.getIp(),
+                        t.getSessionStartedAt() != null ? t.getSessionStartedAt() : t.getCreatedAt(),
+                        t.getLastUsedAt() != null ? t.getLastUsedAt() : t.getCreatedAt(),
+                        t.getTokenHash().equals(currentHash)))
+                .toList();
+    }
+
+    /** Déconnecte un appareil. */
+    @Transactional
+    public void revokeSession(UUID userId, UUID sessionId) {
+        RefreshToken token = refreshTokenRepository.findById(sessionId)
+                .filter(t -> t.getUser().getId().equals(userId))
+                .orElseThrow(() -> new ResourceNotFoundException("Session", sessionId));
+        if (!token.isRevoked()) {
+            token.setRevokedAt(LocalDateTime.now());
+        }
     }
 
     @Transactional(noRollbackFor = AuthenticationFailedException.class)
     public Session refresh(String rawRefreshToken) {
+        return refresh(rawRefreshToken, Device.UNKNOWN);
+    }
+
+    @Transactional(noRollbackFor = AuthenticationFailedException.class)
+    public Session refresh(String rawRefreshToken, Device device) {
         if (rawRefreshToken == null || rawRefreshToken.isBlank()) {
             throw new AuthenticationFailedException("Session expirée, reconnecte-toi.");
         }
@@ -140,7 +217,11 @@ public class AuthService {
             throw new AuthenticationFailedException("Session expirée, reconnecte-toi.");
         }
         token.setRevokedAt(now);
-        return openSession(token.getUser());
+        // Même session (même appareil) : on garde son début et, à défaut, son navigateur
+        return openSession(token.getUser(),
+                new Device(device.userAgent() != null ? device.userAgent() : token.getUserAgent(),
+                        device.ip() != null ? device.ip() : token.getIp()),
+                token.getSessionStartedAt() != null ? token.getSessionStartedAt() : token.getCreatedAt());
     }
 
     /** Déconnexion de l'appareil courant. Idempotent. */
@@ -186,6 +267,11 @@ public class AuthService {
      */
     @Transactional
     public Session changePassword(UUID userId, String currentPassword, String newPassword) {
+        return changePassword(userId, currentPassword, newPassword, Device.UNKNOWN);
+    }
+
+    @Transactional
+    public Session changePassword(UUID userId, String currentPassword, String newPassword, Device device) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Utilisateur", userId));
         if (!passwordEncoder.matches(currentPassword, user.getPassword())) {
@@ -193,29 +279,39 @@ public class AuthService {
         }
         user.setPassword(passwordEncoder.encode(newPassword));
         refreshTokenRepository.revokeAllForUser(userId, LocalDateTime.now());
-        return openSession(user);
+        return openSession(user, device, null);
     }
 
     /** Session d'un compte invité du mode démo (aucun mot de passe connu). */
     @Transactional
-    public Session openDemoSession(User user) {
+    public Session openDemoSession(User user, Device device) {
         if (!user.isDemo()) {
             throw new IllegalArgumentException("Réservé aux comptes de démonstration");
         }
-        return openSession(user);
+        return openSession(user, device, null);
     }
 
     // ================================================================ interne
 
-    private Session openSession(User user) {
+    /** @param startedAt début de la session (rotation) ; null = nouvelle session */
+    private Session openSession(User user, Device device, LocalDateTime startedAt) {
         String raw = SecureTokens.generate();
+        LocalDateTime now = LocalDateTime.now();
         refreshTokenRepository.save(RefreshToken.builder()
                 .user(user)
                 .tokenHash(SecureTokens.hash(raw))
-                .expiresAt(LocalDateTime.now().plus(refreshValidity))
+                .expiresAt(now.plus(refreshValidity))
+                .sessionStartedAt(startedAt != null ? startedAt : now)
+                .lastUsedAt(now)
+                .userAgent(truncate(device.userAgent(), 255))
+                .ip(truncate(device.ip(), 64))
                 .build());
         return new Session(jwtService.generateToken(user.getEmail()), jwtService.getExpirationSeconds(),
                 raw, refreshValidity);
+    }
+
+    private static String truncate(String s, int max) {
+        return s == null || s.length() <= max ? s : s.substring(0, max);
     }
 
     private void sendVerification(User user) {

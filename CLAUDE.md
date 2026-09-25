@@ -367,6 +367,28 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
   transaction) puis ouvre la session. `DemoJobs` supprime les invités de plus
   de 24 h (snapshots d'abord). `UserResponse.demo`.
 
+## Sécurité du compte et RGPD (v5, lot D, V17)
+- **Double authentification TOTP** (`auth/twofactor`) : `Totp` (RFC 6238,
+  HMAC-SHA1, 30 s, 6 chiffres, ± 1 pas, JDK seule, testé sur les vecteurs de
+  la RFC). Secret chiffré AES-256-GCM (`SecretCipher`, clé
+  `app.security.totp-key` à fixer en prod, sinon générée dans app_secrets).
+  Un code n'est jamais accepté deux fois (`users.totp_last_step`). 8 codes de
+  secours à usage unique (empreintes, `totp_recovery_codes`).
+  API `/api/account/2fa` (status, setup → otpauth URI, enable → codes,
+  disable avec mot de passe + code, recovery-codes).
+- Connexion : si la 2FA est active, `/api/auth/login` renvoie
+  `twoFactorToken` (account_tokens TWO_FACTOR, 5 min) sans session ;
+  `POST /api/auth/2fa/verify {token, code}` ouvre la session (limité à 5
+  essais par défi, 20 par IP / 15 min).
+- **Sessions actives** : `refresh_tokens` retient navigateur, IP, début de
+  session (conservé à chaque rotation) et dernière utilisation.
+  `GET /api/auth/sessions` (session courante = cookie présenté ; d'où
+  /api/auth, seul chemin du cookie), `DELETE /api/auth/sessions/{id}`.
+- **Export RGPD** (`account/`) : `GET /api/account/export` (JSON complet :
+  compte, portefeuilles, opérations, mouvements, plans, valeurs saisies,
+  objectifs, alertes, suivis), `GET /api/account/export/transactions.csv`
+  (format générique réimportable).
+
 ## Tutoriels (`tutorial/`)
 - `tutorial_states` (V12) : une ligne par compte, `auto_enabled` + clés des
   visites terminées (CSV, clés `[a-z0-9-]{1,40}`, 40 max). Les clés sont

@@ -40,7 +40,7 @@ public class DemoService {
     private final AuthService authService;
     private final TransactionTemplate tx;
 
-    public AuthService.Session start() {
+    public AuthService.Session start(AuthService.Device device) {
         if (userRepository.countByDemoTrue() >= MAX_LIVE_DEMOS) {
             throw new BadRequestException("Le mode démo est très demandé : réessaie dans quelques minutes");
         }
@@ -60,7 +60,7 @@ public class DemoService {
             delete(user);
             throw new BadRequestException("La démo n'a pas pu être préparée (cours indisponibles) : réessaie dans un instant");
         }
-        return authService.openDemoSession(user);
+        return authService.openDemoSession(user, device);
     }
 
     /** Supprime les comptes invités de plus de 24 h. */
