@@ -21,6 +21,7 @@ import java.util.UUID;
 public class AssetController {
 
     private final AssetService assetService;
+    private final AssetReplacementService assetReplacementService;
 
     @GetMapping
     public ResponseEntity<List<AssetResponse>> findByPortfolioIdAndUserId(
@@ -51,6 +52,14 @@ public class AssetController {
             @Valid @RequestBody AssetUpdateRequest request,
             @AuthenticationPrincipal CustomUserDetails userDetails) {
         return ResponseEntity.ok(assetService.update(assetId, request, userDetails.getId()));
+    }
+
+    /** Remplacer l'actif d'une ligne (opérations conservées) ; fusion si le nouvel actif est déjà présent. */
+    @PostMapping("/{assetId}/replace")
+    public ResponseEntity<AssetResponse> replace(@PathVariable UUID portfolioId, @PathVariable UUID assetId,
+            @RequestBody java.util.Map<String, String> body,
+            @AuthenticationPrincipal CustomUserDetails user) {
+        return ResponseEntity.ok(assetReplacementService.replace(portfolioId, assetId, body.get("symbol"), user.getId()));
     }
 
     @DeleteMapping("/{assetId}")

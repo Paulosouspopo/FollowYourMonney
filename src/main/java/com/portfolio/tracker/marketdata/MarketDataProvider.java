@@ -21,4 +21,14 @@ public interface MarketDataProvider {
     List<MarketPricePoint> getDailyHistory(String symbol, LocalDate from, LocalDate to);
 
     List<AssetSearchResult> search(String query);
+
+    /**
+     * Dividendes détachés sur [from, to], par action. Liste vide par défaut
+     * (fournisseur sans dividendes) ; ne lève pas pour un actif qui n'en verse pas.
+     *
+     * @throws MarketDataUnavailableException si le provider est injoignable
+     */
+    default List<DividendEvent> getDividends(String symbol, LocalDate from, LocalDate to) {
+        return List.of();
+    }
 }

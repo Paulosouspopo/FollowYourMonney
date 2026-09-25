@@ -3,6 +3,7 @@ package com.portfolio.tracker.marketdata.yahoo.dto;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 import java.util.List;
+import java.util.Map;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record YahooChartResponse(Chart chart) {
@@ -12,7 +13,16 @@ public record YahooChartResponse(Chart chart) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record Result(Meta meta, List<Long> timestamp, Indicators indicators) {
+    public record Result(Meta meta, List<Long> timestamp, Indicators indicators, Events events) {
+    }
+
+    /** Présent avec {@code events=div} : dividendes indexés par horodatage (secondes). */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record Events(Map<String, Dividend> dividends) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record Dividend(Double amount, Long date) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

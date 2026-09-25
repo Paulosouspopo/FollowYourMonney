@@ -231,6 +231,30 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
   au taux de chaque jour (`curveCurrency`) ; les totaux restent en EUR (le
   front les convertit au taux du jour). Les calculs restent en EUR.
 
+## Qualité des saisies (`quality/`)
+- `QualityRules` (pur, testé) : écart prix / clôture du jour toléré 15 %
+  (25 % crypto) ; au-delà de ×5 (ou ÷5) = `SPLIT_SUSPECTED` (division
+  d'actions non reflétée : les séries Yahoo sont corrigées rétroactivement,
+  SANS événement de split ; ou zéro en trop), jamais proposé comme « prix à
+  utiliser » ; PEA : crypto ou cotation hors UE (suffixes Yahoo).
+- `/api/data-checks/transaction` pendant la saisie (peut télécharger
+  l'historique), `/api/data-checks` audit de l'existant en mémoire sans
+  réseau (divisions regroupées par actif si écart comparable),
+  `/api/data-checks/dismiss` (« c'est normal », table `data_check_dismissals`).
+
+## Revenus passifs (`income/`)
+- Dividendes par action : `MarketDataProvider.getDividends` (Yahoo
+  `events=div`, cache 12 h par symbole dans `IncomeService`).
+- `/api/income` : projection 12 mois = dividendes des 12 derniers mois ×
+  quantité (`DividendProjection`, pur) + livrets (solde × taux, versé au
+  31/12) ; reçu par mois (DIVIDEND nets + mouvements INTEREST) sur 24 mois ;
+  prochains versements estimés (dates de l'an dernier + 1 an).
+
+## Objectifs (`goal/`)
+- `goals` (V10) : montant, échéance facultative, patrimoine ou portefeuille.
+  `/api/goals` renvoie valeur actuelle du périmètre + versements programmés
+  mensuels ; la projection (intérêts composés, délai, effort) est côté front.
+
 ## Dev local : antivirus Avast
 - Avast (« Web/Mail Shield », analyse HTTPS) re-signe tout le trafic HTTPS :
   Java refuse alors Yahoo (`PKIX path building failed`), git et Docker aussi.
