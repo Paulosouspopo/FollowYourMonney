@@ -26,6 +26,15 @@ public record PortfolioCreateRequest(
 
         @DecimalMin(value = "0.0", message = "Le taux doit être positif ou nul")
         @DecimalMax(value = "100.0", message = "Le taux doit être inférieur à 100 %")
-        BigDecimal annualInterestRate
+        BigDecimal annualInterestRate,
 
-) {}
+        /** Date d'ouverture du compte (facultative ; PEA : départ des 5 ans). */
+        @jakarta.validation.constraints.PastOrPresent(message = "La date d'ouverture ne peut pas être dans le futur")
+        java.time.LocalDate openedAt
+) {
+    /** Sans date d'ouverture. */
+    public PortfolioCreateRequest(String name, String description, PortfolioType type, Boolean cashTracking,
+            BigDecimal annualInterestRate) {
+        this(name, description, type, cashTracking, annualInterestRate, null);
+    }
+}
