@@ -94,4 +94,9 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
         Optional<LocalDateTime> findFirstTransactionDate(@Param("portfolioId") UUID portfolioId);
 
         boolean existsByExternalRef(String externalRef);
+
+        /** Rattache toutes les opérations d'un actif à un autre (fusion de lignes). */
+        @org.springframework.data.jpa.repository.Modifying(flushAutomatically = true, clearAutomatically = true)
+        @Query("UPDATE Transaction t SET t.asset.id = :targetId WHERE t.asset.id = :sourceId")
+        int moveToAsset(@Param("sourceId") UUID sourceId, @Param("targetId") UUID targetId);
 }
