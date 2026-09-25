@@ -55,6 +55,14 @@ public class Asset {
      */
     private String exchangeName;
 
+    /**
+     * Actif non coté (fonds absent de Yahoo, FCPE…) : valeurs saisies par
+     * l'utilisateur, symbole interne (voir {@link ManualAssets}).
+     */
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean manual = false;
+
     @OneToMany(mappedBy = "asset", cascade = CascadeType.ALL)
     private List<Transaction> transactions;
 

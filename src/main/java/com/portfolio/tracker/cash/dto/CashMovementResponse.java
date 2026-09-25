@@ -7,12 +7,16 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
-/** Montant en EUR, toujours positif (le type donne le sens). */
+/** Montant toujours positif (le type donne le sens), dans sa devise ; `amountEur` au taux du jour du mouvement. */
 public record CashMovementResponse(
         UUID id,
         UUID portfolioId,
         CashMovementType type,
         BigDecimal amount,
+        String currency,
+        BigDecimal amountEur,
+        BigDecimal counterAmount,
+        String counterCurrency,
         LocalDate movementDate,
         String notes,
         LocalDateTime createdAt,

@@ -57,6 +57,11 @@ public class User {
     private Role role = Role.USER;
 
     /** Connexion refusée tant que l'adresse n'est pas confirmée. */
+    /** Tranche marginale d'imposition (%) : avantage fiscal estimé des versements PER. */
+    @Column(name = "marginal_tax_rate", nullable = false)
+    @Builder.Default
+    private int marginalTaxRate = 30;
+
     @Column(name = "email_verified", nullable = false)
     @Builder.Default
     private boolean emailVerified = false;

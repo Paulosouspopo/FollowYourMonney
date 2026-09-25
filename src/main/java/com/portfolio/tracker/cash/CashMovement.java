@@ -13,7 +13,7 @@ import java.util.Comparator;
 import java.util.UUID;
 
 /**
- * Mouvement d'argent sur un portefeuille, en EUR.
+ * Mouvement d'argent sur un portefeuille, en EUR ou dans une devise du compte.
  * Le montant est toujours positif : {@link #getType()} donne le sens du flux.
  */
 @Entity
@@ -45,6 +45,23 @@ public class CashMovement {
     @Column(nullable = false, precision = 19, scale = 2)
     private BigDecimal amount;
 
+    /** Devise du montant (EUR sauf compte multidevise). */
+    @Column(nullable = false, length = 3)
+    @Builder.Default
+    private String currency = "EUR";
+
+    /** Taux vers l'euro du jour du mouvement (1 en EUR), figé comme sur une transaction. */
+    @Column(name = "exchange_rate_to_eur", nullable = false, precision = 19, scale = 8)
+    @Builder.Default
+    private BigDecimal exchangeRateToEur = BigDecimal.ONE;
+
+    /** Change (CONVERSION) : montant reçu, dans {@link #counterCurrency}. */
+    @Column(name = "counter_amount", precision = 19, scale = 2)
+    private BigDecimal counterAmount;
+
+    @Column(name = "counter_currency", length = 3)
+    private String counterCurrency;
+
     @Column(name = "movement_date", nullable = false)
     private LocalDate movementDate;
 
@@ -63,8 +80,13 @@ public class CashMovement {
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
-    /** Effet sur le solde (positif = entrée d'argent). */
+    /** Effet sur le solde de sa devise (positif = entrée d'argent). */
     public BigDecimal signedAmount() {
         return type.signed(amount);
+    }
+
+    /** Montant en euros au taux du jour du mouvement. */
+    public BigDecimal amountEur() {
+        return amount.multiply(exchangeRateToEur).setScale(2, java.math.RoundingMode.HALF_UP);
     }
 }

@@ -35,14 +35,17 @@ public final class PerformanceFlows {
         };
     }
 
-    /** Découvert : partie négative du solde, comptée comme apport implicite. */
-    public static BigDecimal deficit(CashState cash) {
-        return cash.getBalanceEur().signum() < 0 ? cash.getBalanceEur().negate() : BigDecimal.ZERO;
+    /**
+     * Découvert : partie négative du solde (valorisé en euros), comptée comme
+     * apport implicite.
+     */
+    public static BigDecimal deficit(BigDecimal cashValueEur) {
+        return cashValueEur.signum() < 0 ? cashValueEur.negate() : BigDecimal.ZERO;
     }
 
     /** Apports cumulés d'un compte suivi : versements nets + découvert. */
-    public static BigDecimal contributed(CashState cash) {
-        return cash.getNetDepositsEur().add(deficit(cash));
+    public static BigDecimal contributed(CashState cash, BigDecimal cashValueEur) {
+        return cash.getNetDepositsEur().add(deficit(cashValueEur));
     }
 
     private static BigDecimal nz(BigDecimal v) {

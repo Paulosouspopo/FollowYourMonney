@@ -98,8 +98,9 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
   (`priceMissing = true`), dashboard comme courbe.
 
 ## Liquidités et livrets
-- `CashMovement` (versement, retrait, intérêts, frais de compte), en EUR,
-  montant toujours positif (le type donne le sens). API :
+- `CashMovement` (versement, retrait, intérêts, frais de compte, abondement,
+  change), en EUR sauf compte multidevise, montant toujours positif (le type
+  donne le sens). API :
   `/api/portfolios/{id}/cash-movements`.
 - `Portfolio.cashTracking` : le solde entre dans la valeur. Forcé pour un
   LIVRET (`PortfolioRules`), optionnel ailleurs ; mouvements refusés si
@@ -273,6 +274,47 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
   3VG/3VH, 2DC, 3AN/3BN, flat tax 30 %, PEA (5 ans depuis `opened_at` (V11)
   ou la 1re opération, plafond 150 000 €, versements estimés sans suivi des
   liquidités, 17,2 % en cas de retrait). Estimation : l'IFU fait foi.
+
+## Enveloppes, actifs non cotés, devises (V13)
+- `PortfolioType` : ASSURANCE_VIE, PER, EPARGNE_SALARIALE (= « enveloppes à
+  versements », `PortfolioRules.isSavingsWrapper`) : liquidités toujours
+  suivies. Le solde = fonds euros (AV, PER, rémunéré au taux
+  `annualInterestRate`) ou sommes à investir (épargne salariale). Leurs ventes
+  et dividendes internes sont exclus de la fiscalité compte-titres
+  (`PortfolioRules.isTaxSheltered`, avec PEA et livrets).
+- `CashMovementType.ABONDEMENT` (épargne salariale, PER) : apport compté dans
+  `netDepositsEur` (performance) et suivi à part (`employerContributionsEur`).
+- **Compte multidevise** (`Portfolio.multiCurrencyCash`, exige le suivi des
+  liquidités) : une opération en devise est réglée dans sa devise.
+  `CashMovement.currency` + `exchangeRateToEur` (taux du jour du mouvement) ;
+  `CONVERSION` = change (`amount` en `currency` → `counterAmount` en
+  `counterCurrency`, ni apport ni retrait). `CashState` tient un solde par
+  devise ; `valueEur(taux)` les valorise : taux du jour pour le dashboard, taux
+  historique du jour dans le `rebuild` (paires chargées avec le reste, aucune
+  requête dans la boucle). Apports, intérêts et frais figés en euros au taux du
+  mouvement. Mouvement en devise refusé sur un compte en euros ; repasser en
+  euros refusé tant qu'il en existe.
+- `AssetType.FONDS` : Yahoo `MUTUALFUND` (OPCVM, unités de compte) remonte
+  maintenant dans la recherche.
+- **Actif non coté** (`asset/manual`, `Asset.manual`) : symbole interne
+  `~XXXXXXXXXXXX` (`ManualAssets`, jamais envoyé à Yahoo : garde-fous dans
+  `YahooFinanceClient`, `PriceHistoryService.ensureCoverage`, la cotation
+  horaire). Ses valeurs liquidatives saisies sont des lignes `asset_prices`
+  (source MANUAL, `lastUpdated` = date du relevé) : valorisation, courbe et
+  repli « dernier cours / prix de la dernière opération » sans cas particulier.
+  API : `GET|POST /api/portfolios/{id}/manual-assets`,
+  `GET|PUT /api/portfolios/{id}/assets/{assetId}/valuations`,
+  `DELETE …/valuations/{date}`.
+- **Intérêts estimés** (`InterestEstimator`, pur, testé) : livret = règle des
+  quinzaines, fonds euros = prorata journalier (achats d'UC déduits).
+  `GET /api/portfolios/{id}/cash-movements/interest-estimate?year=` (estimé,
+  année close ou non, déjà crédité) : le front pré-remplit le mouvement.
+- Fiscalité : `users.marginal_tax_rate` (0/11/30/41/45, `PUT /api/tax/settings`) ;
+  `/api/tax` ajoute PER (versements de l'année, case 6NS, économie = versements
+  × tranche), assurance-vie (8 ans depuis `opened_at` ou la 1re opération,
+  part de gains des rachats au prorata gain/valeur, abattement rappelé ; pas de
+  case : l'IFU de l'assureur fait foi), épargne salariale (abondement, 17,2 %).
+- Répartition : catégorie `FONDS_EUROS` pour le solde d'une AV ou d'un PER.
 
 ## Tutoriels (`tutorial/`)
 - `tutorial_states` (V12) : une ligne par compte, `auto_enabled` + clés des

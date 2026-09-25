@@ -1,5 +1,7 @@
 package com.portfolio.tracker.marketdata.yahoo;
 
+import com.portfolio.tracker.asset.ManualAssets;
+
 import com.portfolio.tracker.asset.AssetType;
 import com.portfolio.tracker.marketdata.AssetSearchResult;
 import com.portfolio.tracker.marketdata.MarketDataProvider;
@@ -57,6 +59,9 @@ public class YahooFinanceClient implements MarketDataProvider {
 
     @Override
     public Optional<MarketQuote> getQuote(String symbol) {
+        if (ManualAssets.isManual(symbol)) {
+            return Optional.empty();
+        }
         try {
             YahooChartResponse response = restClient.get()
                     .uri("/v8/finance/chart/{symbol}?range=1d&interval=1d", symbol)
@@ -73,6 +78,9 @@ public class YahooFinanceClient implements MarketDataProvider {
 
     @Override
     public List<MarketPricePoint> getDailyHistory(String symbol, LocalDate from, LocalDate to) {
+        if (ManualAssets.isManual(symbol)) {
+            return List.of();
+        }
         long period1 = from.atStartOfDay(ZoneOffset.UTC).toEpochSecond();
         long period2 = to.plusDays(1).atStartOfDay(ZoneOffset.UTC).toEpochSecond();
         YahooChartResponse response;
@@ -99,6 +107,9 @@ public class YahooFinanceClient implements MarketDataProvider {
 
     @Override
     public List<com.portfolio.tracker.marketdata.DividendEvent> getDividends(String symbol, LocalDate from, LocalDate to) {
+        if (ManualAssets.isManual(symbol)) {
+            return List.of();
+        }
         long period1 = from.atStartOfDay(ZoneOffset.UTC).toEpochSecond();
         long period2 = to.plusDays(1).atStartOfDay(ZoneOffset.UTC).toEpochSecond();
         YahooChartResponse response;
@@ -251,6 +262,7 @@ public class YahooFinanceClient implements MarketDataProvider {
         return switch (yahooType.toUpperCase()) {
             case "EQUITY" -> AssetType.ACTION;
             case "ETF" -> AssetType.ETF;
+            case "MUTUALFUND" -> AssetType.FONDS;
             case "CRYPTOCURRENCY" -> AssetType.CRYPTO;
             default -> null;
         };

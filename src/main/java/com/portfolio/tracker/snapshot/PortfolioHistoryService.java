@@ -164,6 +164,15 @@ public class PortfolioHistoryService {
                 }
             }
         }
+        // Soldes en devises (compte multidevise) : taux de chaque jour
+        for (CashMovement m : cashMovementRepository.findAllByPortfolioIdForHistory(portfolioId)) {
+            for (String currency : new String[] { m.getCurrency(), m.getCounterCurrency() }) {
+                if (isForeign(currency)) {
+                    needs.merge(FxSymbols.pair(currency.toUpperCase(), MoneyConstants.BASE_CURRENCY),
+                            m.getMovementDate(), (a, b) -> a.isBefore(b) ? a : b);
+                }
+            }
+        }
         return needs;
     }
 
@@ -212,11 +221,11 @@ public class PortfolioHistoryService {
 
         snapshotRepository.deleteForRebuild(portfolioId, firstDay, start);
 
-        MarketData market = loadMarketData(txs, start, today);
+        MarketData market = loadMarketData(txs, movements, start, today);
 
         Map<UUID, PositionState> states = new HashMap<>();
         Map<UUID, String> symbols = new HashMap<>();
-        CashState cash = new CashState();
+        CashState cash = new CashState(portfolio.isMultiCurrencyCash());
         List<PortfolioSnapshot> snapshots = new ArrayList<>();
         int next = 0;
         int nextMovement = 0;
@@ -230,7 +239,9 @@ public class PortfolioHistoryService {
             cash.apply(movements.get(nextMovement++));
         }
         // Apports cumulés (versements nets + découvert) : leur variation du jour = flux externe
-        BigDecimal contributedBefore = PerformanceFlows.contributed(cash);
+        LocalDate dayBefore = start.minusDays(1);
+        BigDecimal contributedBefore = PerformanceFlows.contributed(cash,
+                cash.valueEur(c -> market.rateToEur(c, dayBefore, today)));
 
         for (LocalDate day = start; !day.isAfter(today); day = day.plusDays(1)) {
             BigDecimal tradeFlow = BigDecimal.ZERO;
@@ -242,15 +253,17 @@ public class PortfolioHistoryService {
             while (nextMovement < movements.size() && !movements.get(nextMovement).getMovementDate().isAfter(day)) {
                 cash.apply(movements.get(nextMovement++));
             }
+            LocalDate current = day;
+            BigDecimal cashEur = cash.valueEur(c -> market.rateToEur(c, current, today));
             BigDecimal flow = tradeFlow;
             if (trackCash) {
-                BigDecimal contributed = PerformanceFlows.contributed(cash);
+                BigDecimal contributed = PerformanceFlows.contributed(cash, cashEur);
                 flow = contributed.subtract(contributedBefore);
                 contributedBefore = contributed;
             }
-            PortfolioSnapshot snapshot = snapshotOf(portfolio, day, states, symbols, cash, market, today);
+            PortfolioSnapshot snapshot = snapshotOf(portfolio, day, states, symbols, cashEur, market, today);
             snapshot.setNetFlow(flow.setScale(MoneyConstants.MONEY_SCALE, MoneyConstants.ROUNDING));
-            snapshot.setPerformanceValue(snapshot.getTotalValue().add(PerformanceFlows.deficit(cash))
+            snapshot.setPerformanceValue(snapshot.getTotalValue().add(PerformanceFlows.deficit(cashEur))
                     .setScale(MoneyConstants.MONEY_SCALE, MoneyConstants.ROUNDING));
             snapshots.add(snapshot);
         }
@@ -262,7 +275,7 @@ public class PortfolioHistoryService {
 
     private PortfolioSnapshot snapshotOf(Portfolio portfolio, LocalDate day,
             Map<UUID, PositionState> states, Map<UUID, String> symbols,
-            CashState cash, MarketData market, LocalDate today) {
+            BigDecimal cashEur, MarketData market, LocalDate today) {
 
         BigDecimal value = BigDecimal.ZERO;
         BigDecimal invested = BigDecimal.ZERO;
@@ -292,7 +305,6 @@ public class PortfolioHistoryService {
         // Même règle que PortfolioValuationService : les liquidités s'ajoutent à la
         // valeur et à l'investi ; le % latent reste sur le prix de revient des positions.
         BigDecimal positionsCost = invested.setScale(MoneyConstants.MONEY_SCALE, MoneyConstants.ROUNDING);
-        BigDecimal cashEur = cash.getBalanceEur().setScale(MoneyConstants.MONEY_SCALE, MoneyConstants.ROUNDING);
         value = value.setScale(MoneyConstants.MONEY_SCALE, MoneyConstants.ROUNDING).add(cashEur);
         invested = positionsCost.add(cashEur);
         BigDecimal gain = value.subtract(invested);
@@ -322,7 +334,7 @@ public class PortfolioHistoryService {
 
     // ============================================================ données marché
 
-    private MarketData loadMarketData(List<Transaction> txs, LocalDate from, LocalDate to) {
+    private MarketData loadMarketData(List<Transaction> txs, List<CashMovement> movements, LocalDate from, LocalDate to) {
         Set<String> assetSymbols = txs.stream()
                 .map(t -> t.getAsset().getSymbol())
                 .collect(Collectors.toSet());
@@ -333,6 +345,12 @@ public class PortfolioHistoryService {
         Set<String> currencies = new java.util.HashSet<>();
         prices.values().forEach(series -> series.values().forEach(p -> currencies.add(p.currency())));
         txs.forEach(t -> currencies.add(t.getCurrency()));
+        movements.forEach(m -> {
+            currencies.add(m.getCurrency());
+            if (m.getCounterCurrency() != null) {
+                currencies.add(m.getCounterCurrency());
+            }
+        });
         Map<String, String> pairByCurrency = currencies.stream()
                 .filter(PortfolioHistoryService::isForeign)
                 .map(String::toUpperCase)

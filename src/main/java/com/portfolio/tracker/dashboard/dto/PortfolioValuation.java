@@ -40,8 +40,14 @@ public class PortfolioValuation {
     private boolean cashTracking;
     /** Solde de liquidités (0 si non suivi). Peut être négatif. */
     private BigDecimal cashEur;
-    /** Versements - retraits : argent apporté de l'extérieur. */
+    /** Versements - retraits (+ abondement) : argent apporté de l'extérieur. */
     private BigDecimal netDepositsEur;
+    /** Dont abondement de l'employeur (épargne salariale, PER). */
+    private BigDecimal employerContributionsEur;
+    /** Compte multidevise : opérations réglées dans leur devise. */
+    private boolean multiCurrencyCash;
+    /** Soldes par devise, vide si le compte n'a que des euros. */
+    private List<CashBalance> cashBalances;
     /** Taux affiché d'un livret, en %. */
     private BigDecimal annualInterestRate;
 

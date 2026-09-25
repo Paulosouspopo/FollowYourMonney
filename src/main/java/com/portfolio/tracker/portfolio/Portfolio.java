@@ -46,6 +46,14 @@ public class Portfolio {
     @Builder.Default
     private boolean cashTracking = false;
 
+    /**
+     * Compte multidevise : les opérations sont réglées dans leur devise (solde
+     * en USD, GBP…) au lieu d'être converties en euros au taux du jour.
+     */
+    @Column(name = "multi_currency_cash", nullable = false)
+    @Builder.Default
+    private boolean multiCurrencyCash = false;
+
     /** Date d'ouverture du compte (PEA : point de départ des 5 ans). Null = première opération. */
     @Column(name = "opened_at")
     private java.time.LocalDate openedAt;

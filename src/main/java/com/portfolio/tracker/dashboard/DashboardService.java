@@ -227,7 +227,8 @@ public class DashboardService {
 
     /**
      * Répartition par catégorie : type d'actif pour les positions, LIVRET pour
-     * le solde des livrets, LIQUIDITES pour celui des autres comptes suivis.
+     * le solde des livrets, FONDS_EUROS pour celui d'une assurance-vie ou d'un
+     * PER, LIQUIDITES pour celui des autres comptes suivis.
      * Un solde négatif (versements non saisis) n'est pas une part : ignoré.
      */
     private List<AllocationSliceDTO> buildAllocation(ValuationResult v) {
@@ -237,9 +238,10 @@ public class DashboardService {
                 byCategory.merge(position.getAssetType().name(), position.getCurrentValueEur(), BigDecimal::add);
             }
             if (p.getCashEur() != null && p.getCashEur().signum() > 0) {
-                String category = PortfolioRules.holdsOnlyCash(p.getType())
-                        ? PortfolioType.LIVRET.name()
-                        : AllocationSliceDTO.CASH;
+                String category = PortfolioRules.holdsOnlyCash(p.getType()) ? PortfolioType.LIVRET.name()
+                        : p.getType() == PortfolioType.ASSURANCE_VIE || p.getType() == PortfolioType.PER
+                                ? AllocationSliceDTO.EURO_FUND
+                                : AllocationSliceDTO.CASH;
                 byCategory.merge(category, p.getCashEur(), BigDecimal::add);
             }
         }

@@ -1,5 +1,7 @@
 package com.portfolio.tracker.assetprice;
 
+import com.portfolio.tracker.asset.ManualAssets;
+
 import com.portfolio.tracker.asset.Asset;
 import com.portfolio.tracker.asset.AssetRepository;
 import com.portfolio.tracker.marketdata.MarketDataProvider;
@@ -45,6 +47,7 @@ public class AssetPriceService {
             Set<String> distinctSymbols = new LinkedHashSet<>(assetRepository.findAllDistinctSymbols());
             distinctSymbols.addAll(watchlistRepository.findAllDistinctSymbols());
             distinctSymbols.addAll(alertRuleRepository.findDistinctAssetSymbols());
+            distinctSymbols.removeIf(ManualAssets::isManual); // valeurs saisies, pas de cotation
 
             if (distinctSymbols.isEmpty()) {
                 log.info("No assets found to update");
