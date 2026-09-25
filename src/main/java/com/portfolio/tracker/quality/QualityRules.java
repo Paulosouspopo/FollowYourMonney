@@ -36,6 +36,32 @@ public final class QualityRules {
         return price.subtract(market).divide(market, 4, RoundingMode.HALF_UP);
     }
 
+    /**
+     * Rapport prix saisi / cours de marché à partir duquel on soupçonne une
+     * division (ou un regroupement) d'actions plutôt qu'une faute de frappe :
+     * les séries de marché sont corrigées après une division, pas les relevés.
+     */
+    static final BigDecimal SPLIT_RATIO = new BigDecimal("5");
+
+    /**
+     * Facteur de division probable (arrondi, ex. 200 ; ou 0,1 pour un regroupement
+     * par 10), si l'écart est trop grand pour une erreur de saisie. Sinon vide.
+     */
+    public static Optional<BigDecimal> splitFactor(BigDecimal price, BigDecimal market) {
+        if (price == null || market == null || price.signum() <= 0 || market.signum() <= 0) {
+            return Optional.empty();
+        }
+        BigDecimal ratio = price.divide(market, 6, RoundingMode.HALF_UP);
+        if (ratio.compareTo(SPLIT_RATIO) >= 0) {
+            return Optional.of(ratio.setScale(0, RoundingMode.HALF_UP));
+        }
+        BigDecimal inverse = market.divide(price, 6, RoundingMode.HALF_UP);
+        if (inverse.compareTo(SPLIT_RATIO) >= 0) {
+            return Optional.of(BigDecimal.ONE.divide(inverse.setScale(0, RoundingMode.HALF_UP), 6, RoundingMode.HALF_UP));
+        }
+        return Optional.empty();
+    }
+
     public static boolean isSuspicious(BigDecimal deviation, AssetType type) {
         if (deviation == null) {
             return false;

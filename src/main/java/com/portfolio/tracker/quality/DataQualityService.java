@@ -88,6 +88,12 @@ public class DataQualityService {
                 marketClose(symbol, date, quote.get()).ifPresent(close -> {
                     BigDecimal market = close.price().multiply(
                             exchangeRateService.getRateAsOf(close.currency(), currency, close.date()));
+                    Optional<BigDecimal> split = QualityRules.splitFactor(price, market);
+                    if (split.isPresent()) {
+                        warnings.add(new DataWarning("SPLIT_SUSPECTED", splitMessage(symbol, split.get(), close.date(),
+                                Formats.money(market.setScale(2, RoundingMode.HALF_UP), currency)), null, currency, close.date()));
+                        return;
+                    }
                     BigDecimal deviation = QualityRules.deviation(price, market);
                     if (QualityRules.isSuspicious(deviation, assetType)) {
                         BigDecimal suggested = market.setScale(market.compareTo(BigDecimal.ONE) < 0 ? 6 : 2, RoundingMode.HALF_UP);
@@ -163,6 +169,7 @@ public class DataQualityService {
         Map<String, NavigableMap<LocalDate, DailyPrice>> fx = pairs.isEmpty() ? Map.of()
                 : priceHistoryService.loadSeries(pairs, from, today);
 
+        Map<UUID, List<BigDecimal>> splitsByAsset = new HashMap<>();
         for (Transaction t : trades) {
             LocalDate day = t.getTransactionDate().toLocalDate();
             NavigableMap<LocalDate, DailyPrice> series = prices.get(t.getAsset().getSymbol());
@@ -176,15 +183,31 @@ public class DataQualityService {
             if (closeEur == null) {
                 continue;
             }
+            Portfolio portfolio = t.getAsset().getPortfolio();
+            Optional<BigDecimal> split = QualityRules.splitFactor(priceEur, closeEur);
+            if (split.isPresent()) {
+                // Même actif, écart comparable (±25 %) : même cause (division), une seule alerte.
+                // Un écart différent (faute de frappe isolée) reste signalé à part.
+                List<BigDecimal> seen = splitsByAsset.computeIfAbsent(t.getAsset().getId(), id -> new ArrayList<>());
+                boolean similar = seen.stream().anyMatch(f -> split.get().divide(f, 4, RoundingMode.HALF_UP)
+                        .subtract(BigDecimal.ONE).abs().compareTo(new BigDecimal("0.25")) <= 0);
+                if (!similar) {
+                    seen.add(split.get());
+                    out.add(new DataIssue("SPLIT:" + t.getId(), "SPLIT_SUSPECTED", portfolio.getId(), portfolio.getName(),
+                            t.getId(), t.getAsset().getSymbol(), day,
+                            splitMessage(t.getAsset().getSymbol(), split.get(), day, Formats.eur(closeEur)),
+                            null, t.getCurrency()));
+                }
+                continue;
+            }
             BigDecimal deviation = QualityRules.deviation(priceEur, closeEur);
             if (!QualityRules.isSuspicious(deviation, t.getAsset().getAssetType())) {
                 continue;
             }
             BigDecimal suggested = rate.signum() > 0
                     ? closeEur.divide(rate, closeEur.compareTo(BigDecimal.ONE) < 0 ? 6 : 2, RoundingMode.HALF_UP) : null;
-            Portfolio p = t.getAsset().getPortfolio();
             String kind = t.getType() == TransactionType.BUY ? "Achat" : "Vente";
-            out.add(new DataIssue("PRICE:" + t.getId(), "PRICE_MISMATCH", p.getId(), p.getName(), t.getId(),
+            out.add(new DataIssue("PRICE:" + t.getId(), "PRICE_MISMATCH", portfolio.getId(), portfolio.getName(), t.getId(),
                     t.getAsset().getSymbol(), day,
                     kind + " de " + t.getAsset().getSymbol() + " du " + day.format(DAY) + " à "
                             + Formats.money(t.getPricePerUnit(), t.getCurrency()) + " : la clôture était "
@@ -192,6 +215,16 @@ public class DataQualityService {
                             + " (" + Formats.signedPercent(deviation.movePointRight(2)) + ").",
                     suggested, t.getCurrency()));
         }
+    }
+
+    /** Écart trop grand pour une faute de frappe : division (ou regroupement) d'actions probable. */
+    private static String splitMessage(String symbol, BigDecimal factor, LocalDate day, String marketPrice) {
+        String ratio = factor.compareTo(BigDecimal.ONE) >= 0
+                ? "environ " + factor.stripTrailingZeros().toPlainString() + " fois le cours de marché"
+                : "environ " + BigDecimal.ONE.divide(factor, 0, RoundingMode.HALF_UP).toPlainString() + " fois moins que le cours de marché";
+        return symbol + " : prix de " + ratio + " (" + marketPrice + " le " + day.format(DAY) + "). Faute de frappe"
+                + " (un zéro en trop ?) ou division d'actions : dans ce cas la série de marché a été corrigée, pas ton"
+                + " relevé ; rien à faire si la position est soldée, sinon ajuste quantités et prix d'après ton courtier.";
     }
 
     private static BigDecimal toEur(DailyPrice price, Map<String, NavigableMap<LocalDate, DailyPrice>> fx, LocalDate day) {

@@ -102,6 +102,23 @@ class DataQualityFlowTest extends AbstractIntegrationTest {
         assertThat(service.audit(user.getId())).isEmpty();
     }
 
+    @Test
+    @DisplayName("Écart énorme : division d'actions probable, une alerte pour des opérations semblables, une faute isolée à part")
+    void division() {
+        UUID cto = portfolio(PortfolioType.CTO);
+        buy(cto, "QUAL.PA", "20000"); // ×200 : relevé d'avant une division
+        buy(cto, "QUAL.PA", "19800"); // ×198 : même cause
+        buy(cto, "QUAL.PA", "1000");  // ×10 : zéro en trop, cause différente
+
+        List<DataIssue> issues = service.audit(user.getId());
+        assertThat(issues).extracting(DataIssue::code).containsExactly("SPLIT_SUSPECTED", "SPLIT_SUSPECTED");
+        assertThat(issues).allSatisfy(i -> assertThat(i.suggestedPrice()).isNull());
+        assertThat(issues).anySatisfy(i -> assertThat(i.message()).contains("environ 200 fois"));
+
+        assertThat(service.checkTransaction(user.getId(), cto, "QUAL.PA", TransactionType.BUY, today.minusDays(3),
+                new BigDecimal("1000"), "EUR")).extracting(DataWarning::code).containsExactly("SPLIT_SUSPECTED");
+    }
+
     private MarketQuote quote(String symbol, String type) {
         return new MarketQuote(symbol, new BigDecimal("100"), "EUR", LocalDateTime.now(), today, symbol, "Paris", type);
     }

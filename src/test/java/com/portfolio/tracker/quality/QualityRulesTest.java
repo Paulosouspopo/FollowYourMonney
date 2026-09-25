@@ -32,4 +32,14 @@ class QualityRulesTest {
         assertThat(QualityRules.peaProblem("SAP.DE", AssetType.ACTION)).isEmpty();
         assertThat(QualityRules.peaProblem("CW8.PA", AssetType.ETF)).isEmpty();
     }
+
+    @Test
+    @DisplayName("Division d'actions probable : écart d'au moins ×5 (ou ÷5), facteur arrondi")
+    void division() {
+        assertThat(QualityRules.splitFactor(new BigDecimal("1090"), new BigDecimal("5.45"))).hasValueSatisfying(
+                f -> assertThat(f).isEqualByComparingTo("200"));
+        assertThat(QualityRules.splitFactor(new BigDecimal("10"), new BigDecimal("100"))).hasValueSatisfying(
+                f -> assertThat(f).isEqualByComparingTo("0.1"));
+        assertThat(QualityRules.splitFactor(new BigDecimal("25"), new BigDecimal("100"))).isEmpty(); // ×4 : erreur de prix
+    }
 }
