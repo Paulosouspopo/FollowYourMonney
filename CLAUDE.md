@@ -342,6 +342,31 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
   `GET /api/analysis/contributions?period=&portfolioId=`,
   `PUT /api/analysis/fees {symbol, annualFeePct}` (toutes les lignes du symbole).
 
+## Confort (v5, lot C)
+- **Crédit d'impôt 2AB** (`ForeignDividendCredit`, pur, testé) : dividendes
+  d'ACTIONS étrangères × taux de la convention (15 % US/DE/CH…, 10 % JP, 0 %
+  GB), plafonné à 12,8 % ; pays = profil en cache, sinon suffixe Yahoo (sans
+  suffixe = US). Déduit de l'impôt estimé.
+- **Corbeille** (`trash/`, V15) : `TrashRecorder` (sans dépendance métier)
+  enregistre un instantané JSON avant chaque suppression d'opération, de
+  mouvement ou de portefeuille (avec ses opérations et mouvements) ;
+  `TrashService.restore` recrée en repassant par les services (mêmes règles,
+  `external_ref` conservée, actif non coté recréé avec son symbole), une seule
+  transaction. Suppressions : en-tête `X-Trash-Id` (exposé en CORS) pour le
+  bouton « Annuler ». Purge à 30 jours (`TrashJobs`). API `/api/trash`.
+  Supprimer un portefeuille supprime explicitement ses mouvements chargés.
+- **Bilan de l'année** (`wrapped/`) : `GET /api/wrapped?year=` (performance
+  comparée à CW8.PA, mois par mois, lignes star/boulet, revenus, opérations,
+  profil ludique). `PerformanceService.between` et
+  `ContributionService.between` calculent sur une période quelconque.
+- **Mode démo** (`demo/`, V16 `users.demo`) : `POST /api/auth/demo` (5/h par
+  IP, 300 comptes vivants max) crée un invité `demo-…@demo.invalid` rempli par
+  `DemoSeeder` (3 ans aux vrais cours via `MarketPriceLookup` : PEA en DCA +
+  actions, crypto, Livret A, assurance-vie avec fonds non coté, objectif ; le
+  plan programmé est créé après commit car l'exécuteur a sa propre
+  transaction) puis ouvre la session. `DemoJobs` supprime les invités de plus
+  de 24 h (snapshots d'abord). `UserResponse.demo`.
+
 ## Tutoriels (`tutorial/`)
 - `tutorial_states` (V12) : une ligne par compte, `auto_enabled` + clés des
   visites terminées (CSV, clés `[a-z0-9-]{1,40}`, 40 max). Les clés sont

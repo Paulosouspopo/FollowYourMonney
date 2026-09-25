@@ -56,7 +56,8 @@ public class PortfolioController {
     public ResponseEntity<Void> delete(
             @PathVariable UUID id,
             @AuthenticationPrincipal CustomUserDetails userDetails) {
-        portfolioService.deleteById(id, userDetails.getId());
-        return ResponseEntity.noContent().build();
+        java.util.UUID trashId = portfolioService.deleteById(id, userDetails.getId());
+        return ResponseEntity.noContent()
+                .header(com.portfolio.tracker.trash.TrashController.TRASH_ID_HEADER, trashId.toString()).build();
     }
 }

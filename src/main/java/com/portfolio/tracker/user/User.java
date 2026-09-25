@@ -62,6 +62,11 @@ public class User {
     @Builder.Default
     private int marginalTaxRate = 30;
 
+    /** Compte invité du mode démo : données fictives, supprimé 24 h après sa création. */
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean demo = false;
+
     @Column(name = "email_verified", nullable = false)
     @Builder.Default
     private boolean emailVerified = false;

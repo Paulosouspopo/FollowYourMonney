@@ -36,6 +36,7 @@ public class AuthController {
     private final AuthService authService;
     private final RefreshCookie refreshCookie;
     private final RateLimiter rateLimiter;
+    private final com.portfolio.tracker.demo.DemoService demoService;
 
     @PostMapping("/register")
     public ResponseEntity<UserResponse> register(@Valid @RequestBody UserCreateRequest request,
@@ -49,6 +50,13 @@ public class AuthController {
         rateLimiter.check("login-ip:" + http.getRemoteAddr(), 20, QUARTER_HOUR);
         rateLimiter.check("login-email:" + request.email().toLowerCase(), 10, QUARTER_HOUR);
         return withSession(authService.login(request.email(), request.password()));
+    }
+
+    /** Mode démo : compte invité rempli d'un patrimoine fictif, connecté aussitôt (supprimé après 24 h). */
+    @PostMapping("/demo")
+    public ResponseEntity<AuthResponse> demo(HttpServletRequest http) {
+        rateLimiter.check("demo:" + http.getRemoteAddr(), 5, HOUR);
+        return withSession(demoService.start());
     }
 
     /** Nouveau jeton d'accès à partir du cookie ; appelé aussi au chargement de l'app. */

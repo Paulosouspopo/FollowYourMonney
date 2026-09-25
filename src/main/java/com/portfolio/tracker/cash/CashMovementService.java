@@ -39,6 +39,7 @@ public class CashMovementService {
     private final CashMovementMapper mapper;
     private final ApplicationEventPublisher eventPublisher;
     private final ExchangeRateService exchangeRateService;
+    private final com.portfolio.tracker.trash.TrashRecorder trashRecorder;
 
     public List<CashMovementResponse> findByPortfolio(UUID portfolioId, UUID userId) {
         getPortfolio(portfolioId, userId);
@@ -87,15 +88,18 @@ public class CashMovementService {
         return mapper.toResponse(saved);
     }
 
+    /** @return identifiant du mouvement dans la corbeille (restaurable 30 jours) */
     @Transactional
-    public void delete(UUID portfolioId, UUID movementId, UUID userId) {
+    public UUID delete(UUID portfolioId, UUID movementId, UUID userId) {
         CashMovement movement = getMovement(portfolioId, movementId, userId);
         // Supprimer un versement ne doit pas rendre un retrait ultérieur impossible
         checkBalance(movement.getPortfolio(), movementRepository.findAllByPortfolioIdForHistory(portfolioId).stream()
                 .filter(m -> !m.getId().equals(movementId))
                 .toList());
+        UUID trashId = trashRecorder.record(userId, movement);
         movementRepository.delete(movement);
         eventPublisher.publishEvent(new PortfolioHistoryChangedEvent(portfolioId, movement.getMovementDate()));
+        return trashId;
     }
 
     // ------------------------------------------------------------------ règles

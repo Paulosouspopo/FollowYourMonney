@@ -69,8 +69,17 @@ public class PerformanceService {
      */
     public PerformanceResponse performance(UUID userId, UUID portfolioId, String periodCode, String benchmark) {
         PerformancePeriod period = PerformancePeriod.fromCode(periodCode);
-        LocalDate today = LocalDate.now();
-        LocalDate requestedStart = period.start(today);
+        LocalDate now = LocalDate.now();
+        return between(userId, portfolioId, period.code(), period.start(now), now, benchmark);
+    }
+
+    /**
+     * Performance entre deux dates (bilan d'une année passée…) ; {@code end}
+     * au plus aujourd'hui. {@code requestedStart} null = depuis le début.
+     */
+    public PerformanceResponse between(UUID userId, UUID portfolioId, String label, LocalDate requestedStart,
+            LocalDate end, String benchmark) {
+        LocalDate today = end.isAfter(LocalDate.now()) ? LocalDate.now() : end;
 
         Loaded loaded = Objects.requireNonNull(tx.execute(s -> load(userId, portfolioId, requestedStart)));
         List<Row> rows = loaded.rows();
@@ -103,7 +112,7 @@ public class PerformanceService {
         }
 
         long days = start.until(today, java.time.temporal.ChronoUnit.DAYS) + 1;
-        return new PerformanceResponse(period.code(), start, today,
+        return new PerformanceResponse(label, start, today,
                 money(total.startValue()), money(total.endValue()), money(total.netFlows()), money(total.gain()),
                 pct(total.twr()), days >= 365 ? pct(annualize(total.twr(), days)) : null,
                 pct(total.mwr()), days >= 365 && total.xirr() != null ? pct(total.xirr()) : null,

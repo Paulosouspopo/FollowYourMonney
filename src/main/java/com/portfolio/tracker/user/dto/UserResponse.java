@@ -10,6 +10,8 @@ public record UserResponse(
         String username,
         String preferredCurrency,
         Role role,
+        /** Compte invité du mode démo. */
+        boolean demo,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {}

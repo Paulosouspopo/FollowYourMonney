@@ -55,11 +55,13 @@ public record TaxReport(int year, List<Integer> years, Securities securities, Cr
      *
      * @param carriedLossesUsedEur moins-values des années précédentes imputées cette année
      * @param lossesCarryForwardEur moins-values encore reportables sur les années suivantes
-     * @param estimatedTaxEur       flat tax 30 % (12,8 % d'impôt + 17,2 % de prélèvements sociaux)
+     * @param estimatedTaxEur       flat tax 30 % (12,8 % d'impôt + 17,2 % de prélèvements sociaux), crédit d'impôt déduit
+     * @param foreignTaxCreditEur   crédit d'impôt estimé sur les dividendes d'actions étrangères (case 2AB)
      */
     public record Securities(List<Sale> sales, BigDecimal gainsEur, BigDecimal lossesEur, BigDecimal netEur,
                              BigDecimal carriedLossesUsedEur, BigDecimal taxableGainEur, BigDecimal lossesCarryForwardEur,
-                             BigDecimal dividendsEur, BigDecimal estimatedTaxEur, List<Box> boxes) {
+                             BigDecimal dividendsEur, BigDecimal foreignTaxCreditEur, BigDecimal estimatedTaxEur,
+                             List<Box> boxes) {
     }
 
     public record Sale(LocalDate date, String symbol, String name, BigDecimal quantity, BigDecimal proceedsEur,

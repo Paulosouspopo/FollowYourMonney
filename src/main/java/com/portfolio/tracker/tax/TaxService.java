@@ -51,6 +51,7 @@ public class TaxService {
     private final PortfolioValuationService valuationService;
     private final PriceHistoryService priceHistoryService;
     private final com.portfolio.tracker.user.UserRepository userRepository;
+    private final com.portfolio.tracker.analysis.AssetProfileRepository profileRepository;
 
     public TaxReport report(UUID userId, Integer requestedYear) {
         List<Transaction> all = transactionRepository.findAllForValuation(userId, null, null);
@@ -173,11 +174,13 @@ public class TaxService {
         BigDecimal losses = sum(sales.stream().map(TaxEngine.SecuritySale::gainEur).filter(g -> g.signum() < 0));
         BigDecimal net = gains.add(losses);
         BigDecimal[] carry = TaxEngine.carryForward(netByYear, year);
-        BigDecimal dividends = sum(txs.stream()
+        List<Transaction> yearDividends = txs.stream()
                 .filter(t -> t.getType() == TransactionType.DIVIDEND && t.getTransactionDate().getYear() == year)
-                .map(t -> TaxEngine.nz(t.getTotalAmountEur())));
+                .toList();
+        BigDecimal dividends = sum(yearDividends.stream().map(t -> TaxEngine.nz(t.getTotalAmountEur())));
+        BigDecimal credit = foreignTaxCredit(yearDividends);
         BigDecimal taxable = carry[1];
-        BigDecimal tax = taxable.add(dividends).multiply(FLAT_TAX);
+        BigDecimal tax = taxable.add(dividends).multiply(FLAT_TAX).subtract(credit).max(BigDecimal.ZERO);
 
         List<TaxReport.Box> boxes = new ArrayList<>();
         if (net.signum() > 0) {
@@ -188,10 +191,38 @@ public class TaxService {
         if (dividends.signum() > 0) {
             boxes.add(new TaxReport.Box("2DC", "Dividendes (montant brut)", money(dividends), "2042"));
         }
+        if (credit.signum() > 0) {
+            boxes.add(new TaxReport.Box("2AB", "Crédit d'impôt sur dividendes étrangers (retenue à la source)",
+                    money(credit), "2042"));
+        }
         return new TaxReport.Securities(
                 sales.stream().map(s -> new TaxReport.Sale(s.date(), s.symbol(), s.name(), s.quantity(), s.proceedsEur(),
                         s.costEur(), s.gainEur())).toList(),
-                money(gains), money(losses), money(net), carry[0], taxable, carry[2], money(dividends), money(tax), boxes);
+                money(gains), money(losses), money(net), carry[0], taxable, carry[2], money(dividends), money(credit),
+                money(tax), boxes);
+    }
+
+    /**
+     * Crédit d'impôt (2AB) : dividendes d'actions étrangères × taux de la
+     * convention fiscale, plafonné à 12,8 % ({@link ForeignDividendCredit}).
+     * Pays : profil en cache (sans appel réseau), sinon place de cotation.
+     */
+    private BigDecimal foreignTaxCredit(List<Transaction> dividends) {
+        List<Transaction> stocks = dividends.stream()
+                .filter(t -> t.getAsset().getAssetType() == AssetType.ACTION).toList();
+        if (stocks.isEmpty()) {
+            return BigDecimal.ZERO;
+        }
+        Map<String, String> countries = new java.util.HashMap<>();
+        profileRepository.findAllById(stocks.stream().map(t -> t.getAsset().getSymbol()).distinct().toList())
+                .forEach(p -> countries.put(p.getSymbol(), com.portfolio.tracker.analysis.Geography.code(p.getCountry())));
+        BigDecimal credit = BigDecimal.ZERO;
+        for (Transaction t : stocks) {
+            String country = ForeignDividendCredit.country(t.getAsset().getSymbol(), countries.get(t.getAsset().getSymbol()));
+            double rate = ForeignDividendCredit.ratePct(country);
+            credit = credit.add(TaxEngine.nz(t.getTotalAmountEur()).multiply(BigDecimal.valueOf(rate)).movePointLeft(2));
+        }
+        return money(credit);
     }
 
     // ------------------------------------------------------------ crypto
@@ -295,7 +326,7 @@ public class TaxService {
                 "Estimation établie d'après tes opérations saisies ou importées : vérifie-la avec l'IFU de chaque courtier (formulaire 2561), qui fait foi.",
                 "Flat tax par défaut (12,8 % d'impôt + 17,2 % de prélèvements sociaux). L'option pour le barème progressif (case 2OP) peut être plus avantageuse selon ta tranche.",
                 "Comptes ouverts à l'étranger (Binance, Coinbase, Revolut, certains néo-courtiers…) : à déclarer chaque année (formulaire 3916 / 3916-bis), même inactifs.",
-                "Dividendes étrangers : la retenue à la source ouvre parfois droit à un crédit d'impôt, non calculé ici.");
+                "Dividendes étrangers : crédit d'impôt (case 2AB) estimé au taux de la convention fiscale, dans la limite de 12,8 % ; l'IFU de ton courtier fait foi.");
     }
 
     /** Titres d'un compte ordinaire : hors PEA, livrets, assurance-vie, PER et épargne salariale. */

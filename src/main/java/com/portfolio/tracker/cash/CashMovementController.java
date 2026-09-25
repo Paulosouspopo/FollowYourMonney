@@ -54,7 +54,8 @@ public class CashMovementController {
     public ResponseEntity<Void> delete(@PathVariable UUID portfolioId,
             @PathVariable UUID movementId,
             @AuthenticationPrincipal CustomUserDetails user) {
-        service.delete(portfolioId, movementId, user.getId());
-        return ResponseEntity.noContent().build();
+        UUID trashId = service.delete(portfolioId, movementId, user.getId());
+        return ResponseEntity.noContent()
+                .header(com.portfolio.tracker.trash.TrashController.TRASH_ID_HEADER, trashId.toString()).build();
     }
 }

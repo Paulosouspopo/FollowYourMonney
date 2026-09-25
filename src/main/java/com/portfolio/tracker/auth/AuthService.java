@@ -196,6 +196,15 @@ public class AuthService {
         return openSession(user);
     }
 
+    /** Session d'un compte invité du mode démo (aucun mot de passe connu). */
+    @Transactional
+    public Session openDemoSession(User user) {
+        if (!user.isDemo()) {
+            throw new IllegalArgumentException("Réservé aux comptes de démonstration");
+        }
+        return openSession(user);
+    }
+
     // ================================================================ interne
 
     private Session openSession(User user) {

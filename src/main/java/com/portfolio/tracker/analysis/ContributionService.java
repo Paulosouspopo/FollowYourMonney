@@ -59,17 +59,26 @@ public class ContributionService {
 
     public Report contributions(UUID userId, UUID portfolioId, String periodCode) {
         PerformancePeriod period = PerformancePeriod.fromCode(periodCode);
-        LocalDate today = LocalDate.now();
-        List<Transaction> txs = transactionRepository.findAllForValuation(userId, portfolioId, null);
+        LocalDate now = LocalDate.now();
+        return between(userId, portfolioId, period.code(), period.start(now), now);
+    }
+
+    /**
+     * Contributions entre deux dates (bilan d'une année passée…) : valeurs de
+     * fin au soir de {@code end}. {@code requested} null = depuis la première opération.
+     */
+    public Report between(UUID userId, UUID portfolioId, String label, LocalDate requested, LocalDate end) {
+        LocalDate today = end.isAfter(LocalDate.now()) ? LocalDate.now() : end;
+        java.time.LocalDateTime asOf = today.isBefore(LocalDate.now()) ? today.atTime(java.time.LocalTime.MAX) : null;
+        List<Transaction> txs = transactionRepository.findAllForValuation(userId, portfolioId, asOf);
         LocalDate first = txs.stream().map(t -> t.getTransactionDate().toLocalDate()).min(Comparator.naturalOrder())
                 .orElse(today);
-        LocalDate requested = period.start(today);
         LocalDate start = requested == null || requested.isBefore(first) ? first : requested;
         LocalDate eve = start.minusDays(1);
 
         Map<UUID, PositionValuation> current = new HashMap<>();
         Map<UUID, String> portfolioNames = new HashMap<>();
-        valuationService.valuate(userId, portfolioId, null).getPortfolios().forEach(p -> {
+        valuationService.valuate(userId, portfolioId, asOf).getPortfolios().forEach(p -> {
             portfolioNames.put(p.getPortfolioId(), p.getName());
             p.getPositions().forEach(pos -> current.put(pos.getAssetId(), pos));
         });
@@ -124,7 +133,7 @@ public class ContributionService {
                     totalEnd > 0 ? round(endValue / totalEnd * 100) : 0));
         }
         lines.sort(Comparator.comparingDouble(Line::gainEur).reversed());
-        return new Report(period.code(), start, today, round(totalGain), round(totalEnd), lines);
+        return new Report(label, start, today, round(totalGain), round(totalEnd), lines);
     }
 
     /** Taux vers l'euro la veille du début : historique si connu, sinon taux du jour. */
