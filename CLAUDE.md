@@ -274,6 +274,14 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
   ou la 1re opération, plafond 150 000 €, versements estimés sans suivi des
   liquidités, 17,2 % en cas de retrait). Estimation : l'IFU fait foi.
 
+## Tutoriels (`tutorial/`)
+- `tutorial_states` (V12) : une ligne par compte, `auto_enabled` + clés des
+  visites terminées (CSV, clés `[a-z0-9-]{1,40}`, 40 max). Les clés sont
+  définies par le front (visites guidées) ; le back ne fait que les retenir.
+- `GET /api/tutorials`, `POST /api/tutorials/{key}/complete`,
+  `PUT /api/tutorials/settings {autoEnabled}`, `DELETE /api/tutorials` (tout
+  revoir). Chaque appel renvoie l'état complet.
+
 ## Dev local : antivirus Avast
 - Avast (« Web/Mail Shield », analyse HTTPS) re-signe tout le trafic HTTPS :
   Java refuse alors Yahoo (`PKIX path building failed`), git et Docker aussi.
