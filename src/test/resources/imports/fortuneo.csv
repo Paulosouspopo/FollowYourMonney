@@ -1,0 +1,6 @@
+libellé;Opération;Place;Date;Qté;Prix d'éxé;Montant brut;Courtage/Prélèvement;Montant net;Devise;
+FAKE ETF WORLD UCITS ETF - C EUR ACC;Achat Comptant;Euronext Paris;05/03/2026;3.0;100.5;-301.5;-1.05;-302.55;EUR;
+FAKE AUTO N.V.;Encaissement coupons intérêt/dividende;null;04/03/2026;8.0;0.0;20.1;-2.91;17.19;USD;
+FAKE AUTO N.V.;OST de création de coupons - Détachement coupon optionnel;null;03/03/2026;8.0;0.0;20.1;0.0;20.1;USD;
+FAKE ETF WORLD UCITS ETF - C EUR ACC;Vente comptant                                  ;Euronext Paris;02/03/2026;1.0;110.0;110.0;-0.5;109.5;EUR;
+FAKE ETF WORLD UCITS ETF - C EUR ACC;Achat Comptant;Euronext Paris;01/03/2026;2.0;99.0;-198.0;0.0;-198.0;EUR;

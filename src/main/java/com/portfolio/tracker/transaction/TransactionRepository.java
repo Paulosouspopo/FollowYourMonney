@@ -92,4 +92,6 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
                         WHERE t.asset.portfolio.id = :portfolioId
                         """)
         Optional<LocalDateTime> findFirstTransactionDate(@Param("portfolioId") UUID portfolioId);
+
+        boolean existsByExternalRef(String externalRef);
 }

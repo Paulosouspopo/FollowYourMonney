@@ -32,6 +32,7 @@ public class UserMapper {
                 user.getEmail(),
                 user.getUsername(),
                 user.getPreferredCurrency(),
+                user.getRole(),
                 user.getCreatedAt(),
                 user.getUpdatedAt()
         );

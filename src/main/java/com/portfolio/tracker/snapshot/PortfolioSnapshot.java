@@ -56,6 +56,19 @@ public class PortfolioSnapshot {
     @Column(nullable = false, length = 3)
     private String baseCurrency;
 
+    /**
+     * Flux externe du jour en EUR : argent apporté (+) ou retiré (-). Compte
+     * avec suivi des liquidités : versements - retraits (+ découvert apparu) ;
+     * sans suivi : achats (frais compris) - ventes et dividendes nets.
+     * Null pour un snapshot antérieur à son introduction.
+     */
+    @Column(name = "net_flow", precision = 19, scale = 2)
+    private BigDecimal netFlow;
+
+    /** Valeur pour la performance : totalValue, découvert de liquidités compté à 0. */
+    @Column(name = "performance_value", precision = 19, scale = 2)
+    private BigDecimal performanceValue;
+
     @CreationTimestamp
     private LocalDateTime createdAt;
 }

@@ -40,6 +40,14 @@ public interface PortfolioSnapshotRepository extends JpaRepository<PortfolioSnap
   @Query("SELECT MAX(s.snapshotDate) FROM PortfolioSnapshot s WHERE s.portfolio.id = :portfolioId")
   Optional<LocalDate> findLastSnapshotDate(@Param("portfolioId") UUID portfolioId);
 
+  /** Dernier snapshot au jour {@code date} inclus : base d'une variation sur une période. */
+  Optional<PortfolioSnapshot> findTopByPortfolioIdAndSnapshotDateLessThanEqualOrderBySnapshotDateDesc(
+      UUID portfolioId, LocalDate date);
+
+  /** Portefeuilles dont des snapshots n'ont pas encore les flux (antérieurs à V9) : à recalculer. */
+  @Query("SELECT DISTINCT s.portfolio.id FROM PortfolioSnapshot s WHERE s.netFlow IS NULL OR s.performanceValue IS NULL")
+  List<UUID> findPortfolioIdsMissingFlows();
+
   // ---------------------------------------------------------- reconstruction
 
   @Modifying(flushAutomatically = true)

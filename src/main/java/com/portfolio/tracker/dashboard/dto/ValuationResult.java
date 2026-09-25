@@ -24,6 +24,10 @@ public class ValuationResult {
     private BigDecimal totalRealizedGainEur;
     private BigDecimal totalDividendsEur;
     private BigDecimal totalFeesEur;
+    private BigDecimal totalInterestEur;
+    /** Liquidités des portefeuilles suivis (livrets compris). */
+    private BigDecimal totalCashEur;
+    private BigDecimal totalNetDepositsEur;
 
     private List<PortfolioValuation> portfolios;
     private boolean hasIncompletePrices;
@@ -37,6 +41,9 @@ public class ValuationResult {
                 .totalRealizedGainEur(BigDecimal.ZERO)
                 .totalDividendsEur(BigDecimal.ZERO)
                 .totalFeesEur(BigDecimal.ZERO)
+                .totalInterestEur(BigDecimal.ZERO)
+                .totalCashEur(BigDecimal.ZERO)
+                .totalNetDepositsEur(BigDecimal.ZERO)
                 .portfolios(List.of())
                 .hasIncompletePrices(false)
                 .build();
@@ -51,15 +58,20 @@ public class ValuationResult {
         BigDecimal value = sum(portfolios, PortfolioValuation::getCurrentValueEur);
         BigDecimal invested = sum(portfolios, PortfolioValuation::getInvestedEur);
         BigDecimal unrealized = sum(portfolios, PortfolioValuation::getUnrealizedGainEur);
+        BigDecimal cash = sum(portfolios, PortfolioValuation::getCashEur);
 
         return ValuationResult.builder()
                 .totalValueEur(value)
                 .totalInvestedEur(invested)
                 .totalUnrealizedGainEur(unrealized)
-                .totalUnrealizedGainPercentage(percentage(unrealized, invested))
+                // % latent sur le prix de revient des positions : les liquidités ne le diluent pas
+                .totalUnrealizedGainPercentage(percentage(unrealized, invested.subtract(cash)))
                 .totalRealizedGainEur(sum(portfolios, PortfolioValuation::getRealizedGainEur))
                 .totalDividendsEur(sum(portfolios, PortfolioValuation::getDividendsEur))
                 .totalFeesEur(sum(portfolios, PortfolioValuation::getTotalFeesEur))
+                .totalInterestEur(sum(portfolios, PortfolioValuation::getInterestEur))
+                .totalCashEur(cash)
+                .totalNetDepositsEur(sum(portfolios, PortfolioValuation::getNetDepositsEur))
                 .portfolios(portfolios.stream()
                         .sorted(Comparator.comparing(PortfolioValuation::getName,
                                 Comparator.nullsLast(String::compareToIgnoreCase)))

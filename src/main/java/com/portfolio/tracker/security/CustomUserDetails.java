@@ -1,5 +1,6 @@
 package com.portfolio.tracker.security;
 
+import com.portfolio.tracker.user.Role;
 import com.portfolio.tracker.user.User;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -14,13 +15,13 @@ public class CustomUserDetails implements UserDetails {
     private final UUID id;
     private final String email;
     private final String password;
-    private final boolean admin;
+    private final Role role;
 
-    public CustomUserDetails(User user, boolean admin) {
+    public CustomUserDetails(User user) {
         this.id = user.getId();
         this.email = user.getEmail();
         this.password = user.getPassword();
-        this.admin = admin;
+        this.role = user.getRole();
     }
 
     public UUID getId() {
@@ -29,7 +30,7 @@ public class CustomUserDetails implements UserDetails {
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
-        return admin
+        return role == Role.ADMIN
                 ? List.of(new SimpleGrantedAuthority("ROLE_USER"), new SimpleGrantedAuthority("ROLE_ADMIN"))
                 : List.of(new SimpleGrantedAuthority("ROLE_USER"));
     }

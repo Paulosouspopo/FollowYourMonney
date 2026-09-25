@@ -10,7 +10,9 @@ import com.portfolio.tracker.marketdata.MarketQuote;
 import com.portfolio.tracker.marketdata.yahoo.YahooFinanceClient;
 import com.portfolio.tracker.portfolio.Portfolio;
 import com.portfolio.tracker.portfolio.PortfolioRepository;
+import com.portfolio.tracker.portfolio.PortfolioRules;
 import com.portfolio.tracker.shared.MoneyConstants;
+import com.portfolio.tracker.shared.exception.BadRequestException;
 import com.portfolio.tracker.shared.exception.ResourceNotFoundException;
 import com.portfolio.tracker.snapshot.PortfolioHistoryChangedEvent;
 import com.portfolio.tracker.transaction.dto.TransactionCreateRequest;
@@ -79,12 +81,26 @@ public class TransactionService {
 
         @Transactional
         public TransactionResponse create(UUID portfolioId, TransactionCreateRequest request, UUID userId) {
+                return create(portfolioId, request, userId, null);
+        }
+
+        /**
+         * Création depuis un import : mêmes règles qu'une saisie, avec la
+         * référence de l'opération dans le relevé (anti-doublon).
+         */
+        @Transactional
+        public TransactionResponse create(UUID portfolioId, TransactionCreateRequest request, UUID userId,
+                        String externalRef) {
 
                 validateBusinessRules(request.type(), request.quantity(), request.pricePerUnit());
 
                 // Vérifier que le Portfolio appartient à l'utilisateur
                 Portfolio portfolio = portfolioRepository.findByIdAndUserId(portfolioId, userId)
                                 .orElseThrow(() -> new ResourceNotFoundException("Portfolio non accessible"));
+                if (PortfolioRules.holdsOnlyCash(portfolio.getType())) {
+                        throw new BadRequestException(
+                                        "Un livret ne détient pas d'actifs : saisis des versements, retraits ou intérêts");
+                }
 
                 String symbol = request.symbol().trim().toUpperCase();
 
@@ -123,6 +139,7 @@ public class TransactionService {
                                 .feesEur(toEur(fees, rateToEur))
                                 .transactionDate(transactionDate)
                                 .notes(request.notes())
+                                .externalRef(externalRef)
                                 .build();
 
                 List<Transaction> assetTxs = new ArrayList<>(

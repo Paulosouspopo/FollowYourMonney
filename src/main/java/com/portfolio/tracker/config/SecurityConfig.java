@@ -1,6 +1,7 @@
 package com.portfolio.tracker.config;
 
 import com.portfolio.tracker.security.CustomUserDetailsService;
+import com.portfolio.tracker.security.JsonSecurityErrorHandler;
 import com.portfolio.tracker.security.JwtAuthenticationFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -27,6 +28,7 @@ public class SecurityConfig {
 
     private final CustomUserDetailsService userDetailsService;
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final JsonSecurityErrorHandler securityErrorHandler;
 
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -48,12 +50,19 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
-                .cors(withDefaults()) // ← AJOUTE CETTE LIGNE
+                .cors(withDefaults())
+                // Pas de session serveur ni de cookie d'authentification sur l'API
+                // (JWT en en-tête). Le seul cookie, celui de renouvellement, est
+                // SameSite=Strict et limité à /api/auth : pas de CSRF possible.
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .exceptionHandling(e -> e
+                        .authenticationEntryPoint(securityErrorHandler)
+                        .accessDeniedHandler(securityErrorHandler))
                 .authorizeHttpRequests(auth -> auth
+                        // Actions sur la session courante : authentification requise
+                        .requestMatchers("/api/auth/logout-all", "/api/auth/change-password").authenticated()
                         .requestMatchers("/api/auth/**").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/users").permitAll()
                         // Opérations de maintenance (backfill, refresh manuel des cours)
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/asset-prices/**").hasRole("ADMIN")

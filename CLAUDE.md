@@ -13,7 +13,13 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
 ## Stack
 - Java 21, Spring Boot 3.x
 - PostgreSQL 16 (via Docker, `compose.yml`)
-- JPA/Hibernate — pas de Flyway pour l'instant (env dev, `ddl-auto` update)
+- JPA/Hibernate en `ddl-auto=validate` : le schéma est géré par **Flyway**
+  (`src/main/resources/db/migration`). Toute modification d'entité = une
+  nouvelle migration `V<n>__description.sql` (ne JAMAIS modifier une
+  migration déjà appliquée). Les tests d'intégration appliquent les
+  migrations puis Hibernate valide : un oubli fait échouer le build.
+- Base existante sans historique Flyway → baselinée en V1.
+- CI : GitHub Actions (`.github/workflows/ci.yml`, `./mvnw verify`).
 - Lombok
 - Tests : JUnit 5 + Mockito
 
@@ -65,7 +71,7 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
   commit** (sinon le recalcul, en REQUIRES_NEW, ne voit pas les données).
 - `refresh` = `ensureCoverage` (HTTP, hors transaction) puis `rebuild`
   (DB + mémoire, idempotent : delete + reinsert depuis `from`).
-- `rebuild` : 4 requêtes par portefeuille puis parcours jour par jour en
+- `rebuild` : 5 requêtes par portefeuille (dont les mouvements d'argent) puis parcours jour par jour en
   mémoire. **Aucune requête dans la boucle.** Le CUMP est dans `PositionState`,
   partagé avec `PortfolioValuationService` : courbe et dashboard doivent
   toujours donner le même chiffre pour aujourd'hui.
@@ -91,13 +97,182 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
 - Aucun cours de marché → valorisation au prix de la dernière transaction
   (`priceMissing = true`), dashboard comme courbe.
 
+## Liquidités et livrets
+- `CashMovement` (versement, retrait, intérêts, frais de compte), en EUR,
+  montant toujours positif (le type donne le sens). API :
+  `/api/portfolios/{id}/cash-movements`.
+- `Portfolio.cashTracking` : le solde entre dans la valeur. Forcé pour un
+  LIVRET (`PortfolioRules`), optionnel ailleurs ; mouvements refusés si
+  désactivé ; le changer relance un recalcul complet de l'historique.
+- Solde (`CashState`, partagé valorisation/historique comme `PositionState`) =
+  versements - retraits + intérêts - frais de compte - (achats + frais)
+  + (ventes - frais) + (dividendes - frais). Peut être négatif sur un compte
+  (versements non saisis) ; jamais sur un livret (refusé, y compris via une
+  suppression).
+- Valeur = positions + liquidités ; investi = prix de revient + liquidités
+  (la plus-value latente reste celle des positions) ; % latent calculé sur le
+  seul prix de revient. Mêmes règles dans les snapshots.
+- Un livret ne détient pas d'actifs : transactions refusées, et un
+  portefeuille avec actifs ne peut pas devenir un livret.
+- Répartition : catégorie = type d'actif, `LIVRET`, ou `LIQUIDITES`.
+
+## Import de relevés (`imports/`)
+- API : `POST /api/imports/inspect` (format détecté + extrait), `POST
+  /api/imports/preview` (multipart : fichier + partie JSON `options`), `POST
+  /api/imports/commit`. Le fichier n'est jamais stocké.
+- `CsvReader` : UTF-8 (BOM) ou ISO-8859-1, séparateur détecté, guillemets.
+- Un `StatementParser` par courtier (Fortuneo, Trade Republic, Binance) +
+  `GenericParser` (colonnes associées par l'utilisateur). Sans réseau ni base :
+  produisent des `ImportedOperation` (READY / IGNORED avec raison).
+  - Fortuneo : pas d'ISIN → recherche par libellé ; OST de coupon ignorées.
+  - Trade Republic : `transaction_id` = référence ; MIGRATION ignorée ;
+    dividende brut = net + taxe ; horodatage UTC → heure de Paris.
+  - Binance : grand livre → jambes regroupées (même Remark ou < 2 s) ;
+    crypto→crypto = vente + achat estimés au cours de clôture du jour ;
+    récompenses (Crypto Box...) et conversion de leurs poussières ignorées.
+- `AssetResolver` : mémoire (`import_asset_mappings`) → ISIN → paire
+  `CODE-EUR` → `CODE-USD` → recherche par nom. Seuls REMEMBERED/CERTAIN sont
+  acceptés d'office ; l'utilisateur valide le reste (jamais de saisie de symbole).
+- Doublons : `external_ref` (identifiant du courtier ou empreinte de la ligne)
+  sur `transactions` / `cash_movements`, + heuristique (même jour, type,
+  actif, quantité / montant). Réimporter le même relevé ne crée rien.
+- Validation : tout passe par `TransactionService` / `CashMovementService`
+  (mêmes règles qu'une saisie), dans une transaction : une ligne invalide
+  annule tout (`ImportRowException` → 400, champ `row:<id>`). Un seul
+  recalcul d'historique à la fin.
+- Tests sur des relevés FICTIFS (`src/test/resources/imports`). Les exports
+  réels de l'utilisateur sont dans `examples-imports/` : gitignoré, ne JAMAIS
+  les commiter ni en recopier le contenu.
+
+## Investissements programmés (`plan/`)
+- `InvestmentPlan` : BUY (achat d'un actif, pas sur un livret) ou DEPOSIT
+  (versement, compte avec suivi des liquidités). Montant par échéance en
+  EUR frais compris, fréquence (`PlanFrequency`, n-ième échéance calculée
+  depuis la date de début), date de fin, parts entières ou fractionnées, pause.
+- `PlanExecutor` : chaque échéance échue → transaction (cours de clôture du
+  jour via `MarketPriceLookup`, prix estimé) ou versement, référence
+  `PLAN:<id>:<date>` (idempotent). Un plan par transaction sous verrou ;
+  un échec annule le passage et est noté dans `lastError` (retenté le soir).
+  Parts entières : échéance sautée si le montant ne suffit pas.
+- `PlanJobs` : au démarrage + 21h30. Création/modification → exécution
+  immédiate des échéances passées (un plan démarré dans le passé recrée son
+  historique). Reprise après pause : la période de pause n'est pas rattrapée.
+- Après la 1re échéance : type, actif, fréquence et début figés (400).
+- Import : un achat du relevé à ±4 jours d'une échéance de plan sur le même
+  actif est proposé comme doublon (l'exécution réelle du courtier).
+
+## Notifications (`notification/`)
+- `NotificationService.notify` : point d'entrée unique ; toujours dans la
+  boîte de réception (`notifications`), + email si demandé, + push (après
+  commit) sauf si l'utilisateur l'a coupé ou pendant ses heures calmes
+  (`NotificationPreferences`, plage pouvant passer minuit).
+- **Web Push** (`notification/push`) : chiffrement RFC 8291 (aes128gcm) et
+  VAPID RFC 8292 codés avec la JDK seule (`WebPushCrypto`, testé sur le
+  vecteur de la RFC). Clés VAPID : `app.push.vapid-*` (à fixer en prod),
+  sinon générées et gardées en base (`app_secrets`). `PushService` supprime
+  un abonnement refusé en 404/410. API : `/api/push/public-key`,
+  `/api/push/subscriptions`, `/api/push/unsubscribe`, `/api/push/test`,
+  `/api/notification-preferences`.
+- `AlertRule` : périmètre GLOBAL / PORTFOLIO / ASSET (actif détenu ou non) ;
+  conditions RISES / FALLS / MOVES (% sur DAY/WEEK/MONTH), ABOVE / BELOW
+  (EUR), PROFIT_ABOVE / LOSS_BELOW (plus-value latente / prix de revient des
+  positions), NEW_HIGH / NEW_LOW (actif seulement, clôtures WEEK/MONTH/YEAR,
+  seuil 0), WEIGHT_ABOVE (actif ou portefeuille, % du patrimoine). Nom libre
+  (`label` = titre de la notification), canaux push/email, sourdine
+  (`mutedUntil`, `POST /api/alert-rules/{id}/mute`).
+- `AlertEvaluator` : appelé par `MarketDataJobs` juste après la mise à jour
+  horaire des cours. Portefeuille/patrimoine : variation de PLUS-VALUE
+  rapportée à la valeur de départ (snapshot) → un versement/achat ne
+  déclenche rien. Actif : cours EUR vs clôture passée. Anti-répétition :
+  désarmée après déclenchement, réarmée quand la condition retombe (ou
+  chaque nouveau jour pour une variation sur 1 jour ou un record).
+- `PlanExecutor.runDuePlans` prévient aussi d'un NOUVEAU problème de plan
+  (`lastError` changé), pas à chaque nouvel essai.
+- `ReportService` : rapport DAILY / WEEKLY (lundi) à l'heure choisie
+  (Europe/Paris, `TimeZones`), job à hh:15 ; aperçu via
+  `/api/report-settings/preview`.
+- `PlanExecutor.runDuePlans` notifie les échéances exécutées par le job.
+- Purge des notifications de plus de 180 jours.
+
+## Actifs suivis et fiche d'un actif (`watchlist/`)
+- `WatchlistItem` : symbole Yahoo suivi par un utilisateur, détenu ou non
+  (100 max). Ajout = cotation vérifiée + 1 an d'historique téléchargé.
+- La cotation horaire (`AssetPriceService.updateAllAssetPrices`) couvre les
+  symboles détenus, suivis ET visés par une alerte active.
+- `GET /api/watchlist` lit la base (dernier cours, variation vs clôture
+  précédente, 30 jours pour la mini-courbe, quantité détenue, alertes) :
+  pas d'appel réseau. `GET /api/market/detail?symbol=` (cotation live,
+  plus bas/haut 1 an via `MarketPriceLookup.closingRange`, lignes détenues,
+  alertes) et `GET /api/market/history?symbol=&range=1M|3M|6M|1Y|5Y`.
+  Symbole en paramètre de requête (`^FCHI`, `EURUSD=X`).
+
+## Performance (`performance/`)
+- Chaque snapshot porte `net_flow` (flux externe du jour) et
+  `performance_value` (valeur, découvert de liquidités compté à 0), calculés
+  dans le `rebuild` (`PerformanceFlows`) :
+  - compte avec suivi des liquidités : versements - retraits, + découvert
+    apparu (achat non financé = apport implicite, pas une perte) ; intérêts,
+    dividendes et frais = rendement ;
+  - compte sans suivi : achat (frais compris) = apport, vente et dividende
+    nets = retrait.
+- Snapshots sans flux (antérieurs à V9) : `catchUp` recalcule entièrement
+  les portefeuilles concernés.
+- `PerformanceCalculator` (pur, testé) : TWR en Dietz journalier
+  (apport en début de journée, retrait en fin de journée), XIRR (Newton puis
+  dichotomie). Annualisation seulement au-delà d'un an.
+- `GET /api/performance[/portfolios/{id}]?period=1m|3m|ytd|1y|3y|5y|all&benchmark=`
+  : TWR, rendement de l'argent (MWR / XIRR), gain, apports nets, série
+  jour par jour, indice rebasé en EUR (paire FX historique), classement des
+  portefeuilles en vue globale.
+
+## Devise d'affichage
+- `DisplayCurrency` : EUR, USD, GBP, CHF. `GET /api/exchange-rates/display`
+  (taux du jour). `?currency=` sur `/api/dashboard` : la courbe est convertie
+  au taux de chaque jour (`curveCurrency`) ; les totaux restent en EUR (le
+  front les convertit au taux du jour). Les calculs restent en EUR.
+
+## Dev local : antivirus Avast
+- Avast (« Web/Mail Shield », analyse HTTPS) re-signe tout le trafic HTTPS :
+  Java refuse alors Yahoo (`PKIX path building failed`), git et Docker aussi.
+- Contournement : lancer la JVM avec
+  `-Djavax.net.ssl.trustStoreType=Windows-ROOT` (magasin de certificats
+  Windows ; dans VS Code : `java.debug.settings.vmArgs` du `.vscode/settings.json`
+  local), git avec `http.sslBackend=schannel` ; ou désactiver l'analyse
+  HTTPS d'Avast.
+
 ## Sécurité
-- Rôle ADMIN = emails listés dans `app.admin.emails` (pas de rôle en base).
-  Requis pour `/api/admin/**`, `POST /api/asset-prices/**` et les
-  `@PreAuthorize` (`@EnableMethodSecurity` actif).
+- **Session** : JWT d'accès court (15 min, en-tête `Authorization`) + jeton
+  de renouvellement opaque (30 j) dans le cookie `fym_refresh` (HttpOnly,
+  SameSite=Strict, Path=/api/auth, Secure en prod via
+  `app.auth.cookie-secure`). En base : empreinte SHA-256 seulement
+  (`refresh_tokens`, `SecureTokens`).
+- **Rotation** à chaque `/api/auth/refresh` ; un jeton déjà remplacé depuis
+  plus de `AuthService.ROTATION_GRACE` (onglets simultanés) = vol présumé →
+  toutes les sessions de l'utilisateur révoquées.
+- **Comptes** : inscription `POST /api/auth/register` (plus de `POST
+  /api/users` public), email à vérifier avant connexion (403 + code
+  `EMAIL_NOT_VERIFIED`), mot de passe oublié / réinitialisation (liens à usage
+  unique, `account_tokens`), changement de mot de passe et réinitialisation
+  = toutes les sessions révoquées. Réponses identiques pour un email inconnu
+  (pas d'énumération des comptes).
+- **Emails** : `EmailSender` → SMTP si `app.mail.enabled=true` (Mailpit en
+  dev : `docker compose up -d`, http://localhost:8025), sinon écrits dans les
+  logs (le lien de vérification s'y trouve).
+- **Limitation de débit** en mémoire (`RateLimiter`, 429 + Retry-After) sur
+  les endpoints publics sensibles ; désactivée dans le profil test.
+- Non authentifié → **401 JSON** (`JsonSecurityErrorHandler`) : le front s'en
+  sert pour renouveler la session. Rôle insuffisant → 403.
+- **Rôles en base** (`users.role`) ; `app.admin.emails` promeut ADMIN au
+  démarrage (`AdminBootstrap`). ADMIN requis pour `/api/admin/**`,
+  `POST /api/asset-prices/**` et les `@PreAuthorize`.
+- Derrière un reverse proxy en prod : configurer
+  `server.forward-headers-strategy` pour que la limitation par IP voie la
+  vraie adresse du client.
 
 ## Points sensibles / dette technique restante
-- Flyway activé sans migrations alors que `ddl-auto=update` (à trancher).
+- En local, DEUX PostgreSQL écoutent sur 5432 : le service Windows natif
+  (`postgresql-x64-16`, qui contient les données de dev) et le conteneur
+  `compose.yaml` (vide). À unifier.
 - Le job horaire recalcule le point du jour de TOUS les portefeuilles
   (OK à petite échelle ; à cibler sur les portefeuilles détenant les
   symboles mis à jour si le volume grossit).

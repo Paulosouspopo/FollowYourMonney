@@ -38,3 +38,5 @@ application-*.local.properties
 .env
 .env.*
 !application-local.properties.example
+### Exemples d'exports réels (données personnelles) : jamais commités ###
+examples-imports/
