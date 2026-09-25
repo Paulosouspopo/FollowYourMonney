@@ -65,6 +65,7 @@ class EnvelopesFlowTest extends AbstractIntegrationTest {
     @Autowired private PortfolioSnapshotRepository snapshotRepository;
     @Autowired private TaxService taxService;
     @Autowired private UserRepository userRepository;
+    @Autowired private com.portfolio.tracker.shared.CurrencyConverter currencyConverter;
 
     private final LocalDate today = LocalDate.now();
     private User user;
@@ -177,11 +178,15 @@ class EnvelopesFlowTest extends AbstractIntegrationTest {
                 new BigDecimal("200"), BigDecimal.ONE, "USD", today.minusDays(10).atTime(16, 0), null), user.getId());
 
         PortfolioValuation v = valuation(ibkr);
-        // 100 € + 599 $ (1000 - 400 - 1) × 0,90 = 639,10 € de liquidités ; 2 × 200 $ × 0,90 = 360 € de positions
-        assertThat(v.getCashEur()).isEqualByComparingTo("639.10");
+        // Taux du jour tel que la valorisation le voit (d'autres tests peuvent en avoir enregistré un)
+        BigDecimal usd = currencyConverter.openSession().rate("USD", "EUR");
+        // 100 € + 599 $ (1000 - 400 - 1) de liquidités ; 2 × 200 $ de positions
+        BigDecimal cash = new BigDecimal("100").add(new BigDecimal("599").multiply(usd)).setScale(2, java.math.RoundingMode.HALF_UP);
+        assertThat(v.getCashEur()).isEqualByComparingTo(cash);
         assertThat(v.getCashBalances()).extracting(b -> b.currency() + "=" + b.amount().toPlainString())
                 .containsExactly("EUR=100.00", "USD=599.00");
-        assertThat(v.getCurrentValueEur()).isEqualByComparingTo("999.10");
+        assertThat(v.getCurrentValueEur()).isEqualByComparingTo(
+                cash.add(new BigDecimal("400").multiply(usd).setScale(2, java.math.RoundingMode.HALF_UP)));
         assertThat(v.getNetDepositsEur()).isEqualByComparingTo("1000");
     }
 
