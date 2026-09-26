@@ -222,7 +222,7 @@ public class DataQualityService {
         String ratio = factor.compareTo(BigDecimal.ONE) >= 0
                 ? "environ " + factor.stripTrailingZeros().toPlainString() + " fois le cours de marché"
                 : "environ " + BigDecimal.ONE.divide(factor, 0, RoundingMode.HALF_UP).toPlainString() + " fois moins que le cours de marché";
-        return symbol + " : prix de " + ratio + " (" + marketPrice + " le " + day.format(DAY) + "). Faute de frappe"
+        return symbol + " : prix d'" + ratio + " (" + marketPrice + " le " + day.format(DAY) + "). Faute de frappe"
                 + " (un zéro en trop ?) ou division d'actions : dans ce cas la série de marché a été corrigée, pas ton"
                 + " relevé ; rien à faire si la position est soldée, sinon ajuste quantités et prix d'après ton courtier.";
     }

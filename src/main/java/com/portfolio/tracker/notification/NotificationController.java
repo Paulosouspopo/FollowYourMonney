@@ -5,6 +5,7 @@ import com.portfolio.tracker.notification.dto.*;
 import com.portfolio.tracker.notification.push.PushService;
 import com.portfolio.tracker.notification.push.VapidKeys;
 import com.portfolio.tracker.notification.report.ReportService;
+import com.portfolio.tracker.notification.report.ReportSettings;
 import com.portfolio.tracker.security.CustomUserDetails;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -166,9 +167,14 @@ public class NotificationController {
         return reportService.updateSettings(user.getId(), dto);
     }
 
-    /** Le rapport tel qu'il serait envoyé maintenant (rien n'est envoyé). */
+    /**
+     * Le rapport tel qu'il serait envoyé maintenant (rien n'est envoyé).
+     * {@code frequency} : celle choisie à l'écran, même pas encore enregistrée.
+     */
     @GetMapping("/report-settings/preview")
-    public ReportPreview reportPreview(@AuthenticationPrincipal CustomUserDetails user) {
-        return reportService.preview(user.getId(), reportService.settings(user.getId()).frequency());
+    public ReportPreview reportPreview(@AuthenticationPrincipal CustomUserDetails user,
+            @RequestParam(required = false) ReportSettings.Frequency frequency) {
+        return reportService.preview(user.getId(),
+                frequency != null ? frequency : reportService.settings(user.getId()).frequency());
     }
 }
