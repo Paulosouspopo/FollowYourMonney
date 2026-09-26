@@ -91,9 +91,9 @@ public class WrappedService {
             if (worst == null || months[m] < months[worst - 1]) worst = m + 1;
         }
         List<ContributionService.Line> lines = contributions.lines();
-        Line bestLine = lines.stream().filter(l -> l.gainEur() > 0).max(Comparator.comparingDouble(ContributionService.Line::gainEur))
+        Line bestLine = lines.stream().filter(l -> !l.dataSuspect() && l.gainEur() > 0).max(Comparator.comparingDouble(ContributionService.Line::gainEur))
                 .map(WrappedService::line).orElse(null);
-        Line worstLine = lines.stream().filter(l -> l.gainEur() < 0).min(Comparator.comparingDouble(ContributionService.Line::gainEur))
+        Line worstLine = lines.stream().filter(l -> !l.dataSuspect() && l.gainEur() < 0).min(Comparator.comparingDouble(ContributionService.Line::gainEur))
                 .map(WrappedService::line).orElse(null);
 
         List<Transaction> yearTxs = all.stream().filter(t -> t.getTransactionDate().getYear() == year).toList();

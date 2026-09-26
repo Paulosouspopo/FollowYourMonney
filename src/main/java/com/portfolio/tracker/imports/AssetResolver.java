@@ -4,6 +4,7 @@ import com.portfolio.tracker.asset.AssetType;
 import com.portfolio.tracker.imports.dto.AssetResolutionDto;
 import com.portfolio.tracker.imports.dto.AssetResolutionDto.Confidence;
 import com.portfolio.tracker.marketdata.AssetSearchResult;
+import com.portfolio.tracker.marketdata.AssetSearchService;
 import com.portfolio.tracker.marketdata.MarketDataProvider;
 import com.portfolio.tracker.marketdata.MarketQuote;
 import com.portfolio.tracker.marketdata.yahoo.YahooFinanceClient;
@@ -82,7 +83,8 @@ public class AssetResolver {
 
     private AssetResolutionDto resolveByName(AssetRef ref) {
         for (String query : nameQueries(ref.label())) {
-            List<AssetSearchResult> hits = marketDataProvider.search(query);
+            // Même classement que la recherche : cotation en euros d'abord, hors-cote en dernier
+            List<AssetSearchResult> hits = AssetSearchService.rank(marketDataProvider.search(query), query);
             if (hits.isEmpty()) {
                 continue;
             }

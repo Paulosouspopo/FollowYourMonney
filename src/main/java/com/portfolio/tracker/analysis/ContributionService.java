@@ -47,10 +47,16 @@ public class ContributionService {
     private final PortfolioValuationService valuationService;
     private final PriceHistoryService priceHistoryService;
     private final CurrencyConverter currencyConverter;
+    private final com.portfolio.tracker.quality.DataQualityService dataQualityService;
 
+    /**
+     * @param dataSuspect division d'actions probable non reflétée dans les cours
+     *                    (Yahoo corrige l'historique sans événement) : gain et
+     *                    rendement faussés, rendement non calculé
+     */
     public record Line(UUID assetId, UUID portfolioId, String portfolioName, String symbol, String name,
                        AssetType assetType, double startValueEur, double endValueEur, double flowsEur, double gainEur,
-                       Double returnPct, double weightPct) {
+                       Double returnPct, double weightPct, boolean dataSuspect) {
     }
 
     public record Report(String period, LocalDate from, LocalDate to, double gainEur, double endValueEur,
@@ -71,6 +77,11 @@ public class ContributionService {
         LocalDate today = end.isAfter(LocalDate.now()) ? LocalDate.now() : end;
         java.time.LocalDateTime asOf = today.isBefore(LocalDate.now()) ? today.atTime(java.time.LocalTime.MAX) : null;
         List<Transaction> txs = transactionRepository.findAllForValuation(userId, portfolioId, asOf);
+        // Lignes dont les cours sont faussés par une division d'actions probable (« saisies à vérifier »)
+        java.util.Set<String> suspects = dataQualityService.audit(userId).stream()
+                .filter(i -> "SPLIT_SUSPECTED".equals(i.code()))
+                .map(i -> i.portfolioId() + ":" + i.symbol())
+                .collect(java.util.stream.Collectors.toSet());
         LocalDate first = txs.stream().map(t -> t.getTransactionDate().toLocalDate()).min(Comparator.naturalOrder())
                 .orElse(today);
         LocalDate start = requested == null || requested.isBefore(first) ? first : requested;
@@ -126,11 +137,12 @@ public class ContributionService {
             }
             double gain = endValue - startValue - flows;
             double invested = startValue + bought;
+            boolean suspect = suspects.contains(asset.getPortfolio().getId() + ":" + asset.getSymbol());
             totalGain += gain;
             lines.add(new Line(asset.getId(), asset.getPortfolio().getId(), portfolioNames.get(asset.getPortfolio().getId()),
                     asset.getSymbol(), asset.getName(), asset.getAssetType(), round(startValue), round(endValue),
-                    round(flows), round(gain), invested > 0 ? round(gain / invested * 100) : null,
-                    totalEnd > 0 ? round(endValue / totalEnd * 100) : 0));
+                    round(flows), round(gain), invested > 0 && !suspect ? round(gain / invested * 100) : null,
+                    totalEnd > 0 ? round(endValue / totalEnd * 100) : 0, suspect));
         }
         lines.sort(Comparator.comparingDouble(Line::gainEur).reversed());
         return new Report(label, start, today, round(totalGain), round(totalEnd), lines);

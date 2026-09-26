@@ -29,6 +29,9 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
   rate limit connu à ce jour).
 - ❌ **AssetTemplate / AssetExternalService (whitelist figée) supprimés** →
   remplacés par une **recherche live** via `GET /v1/finance/search?q=...`.
+  Classement (`AssetSearchService.rank`, aussi pour l'import) : cotation en
+  euros d'abord (places de la zone euro, crypto `-EUR`), puis place d'origine
+  US, hors-cote (OTC) en dernier.
   L'utilisateur tape un nom, choisit dans les résultats Yahoo, le `symbol`
   exact retourné (ex: `TTE.PA`, `BTC-EUR`) est stocké tel quel dans `Asset`.
   Ne jamais laisser l'utilisateur saisir un symbole à la main.
@@ -110,9 +113,15 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
   + (ventes - frais) + (dividendes - frais). Peut être négatif sur un compte
   (versements non saisis) ; jamais sur un livret (refusé, y compris via une
   suppression).
-- Valeur = positions + liquidités ; investi = prix de revient + liquidités
-  (la plus-value latente reste celle des positions) ; % latent calculé sur le
-  seul prix de revient. Mêmes règles dans les snapshots.
+- **Investi = apports nets** (argent sorti de la poche, `PerformanceFlows`) :
+  compte suivi = versements - retraits + découvert (versements non saisis) ;
+  sans suivi = achats (frais compris) - ventes nettes - dividendes nets (peut
+  être négatif). Valeur d'un compte suivi = positions + solde POSITIF (un
+  découvert ne diminue pas la valeur). Gain = valeur - investi = gain total
+  (latent + réalisé + dividendes + intérêts - frais) : une vente ou un
+  dividende ne le change pas. % latent calculé sur le seul prix de revient des
+  positions (`positionsCostEur`). Mêmes règles dans les snapshots (V18 a forcé
+  leur recalcul). `cashEur` reste le solde réel, négatif compris.
 - Un livret ne détient pas d'actifs : transactions refusées, et un
   portefeuille avec actifs ne peut pas devenir un livret.
 - Répartition : catégorie = type d'actif, `LIVRET`, ou `LIQUIDITES`.
@@ -245,7 +254,10 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
 
 ## Revenus passifs (`income/`)
 - Dividendes par action : `MarketDataProvider.getDividends` (Yahoo
-  `events=div`, cache 12 h par symbole dans `IncomeService`).
+  `events=div`, cache 12 h par symbole dans `IncomeService`). Fréquence =
+  écart médian entre détachements sur 2 ans (`DividendProjection.paymentsPerYear`),
+  projection sur le dernier cycle (`lastCycle`, 400 jours) : un calendrier qui
+  glisse de quelques jours reste trimestriel.
 - `/api/income` : projection 12 mois = dividendes des 12 derniers mois ×
   quantité (`DividendProjection`, pur) + livrets (solde × taux, versé au
   31/12) ; reçu par mois (DIVIDEND nets + mouvements INTEREST) sur 24 mois ;
@@ -271,9 +283,13 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
   (vente + achat du même compte à ≤ 2 min, montants à ±5 %) non imposables et
   sans effet sur le PTA ; franchise de 305 €.
 - `/api/tax?year=` (défaut : année écoulée) : cessions, dividendes, cases
-  3VG/3VH, 2DC, 3AN/3BN, flat tax 30 %, PEA (5 ans depuis `opened_at` (V11)
+  3VG/3VH, 2DC, 3AN/3BN, flat tax selon l'année (`TaxRates` : 30 %
+  jusqu'en 2025, 31,4 % dès 2026 avec 18,6 % de prélèvements sociaux ;
+  assurance-vie à 17,2 %), taux renvoyés dans `rates`, PEA (5 ans depuis `opened_at` (V11)
   ou la 1re opération, plafond 150 000 €, versements estimés sans suivi des
-  liquidités, 17,2 % en cas de retrait). Estimation : l'IFU fait foi.
+  liquidités, prélèvements sociaux de l'année en cours en cas de retrait).
+  Apports des enveloppes = `investedEur` (découvert compris). Estimation :
+  l'IFU fait foi.
 
 ## Enveloppes, actifs non cotés, devises (V13)
 - `PortfolioType` : ASSURANCE_VIE, PER, EPARGNE_SALARIALE (= « enveloppes à
@@ -332,6 +348,8 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
   frais (TER Yahoo ou saisi `assets.annual_fee_pct`, coût sur 20 ans à 5 %).
   Pays d'un ETF estimés d'après l'indice cité dans son nom (`Geography`,
   répartition approximative des grands indices ; « non déterminé » sinon).
+- `ContributionService` : lignes `dataSuspect` (division d'actions probable,
+  audit qualité) sans rendement et hors star/boulet du bilan.
 - `ContributionService` : gain de chaque ligne sur une période = valeur finale
   − valeur la veille du début − flux (achats − ventes − dividendes nets), cours
   et taux lus en base (aucun appel réseau).

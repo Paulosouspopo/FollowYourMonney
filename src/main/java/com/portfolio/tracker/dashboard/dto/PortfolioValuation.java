@@ -11,9 +11,9 @@ import java.util.UUID;
 /**
  * Valorisation d'un portefeuille. Montants en EUR.
  *
- * Avec le suivi des liquidités, le solde entre dans la valeur ET dans
- * l'investi (argent engagé sur le compte) : la plus-value latente reste celle
- * des positions, et son pourcentage est calculé sur leur seul prix de revient.
+ * Investi = apports nets (argent sorti de la poche) : valeur - investi = gain
+ * total (latent + réalisé + dividendes + intérêts - frais). La plus-value
+ * latente reste celle des positions, en % de leur seul prix de revient.
  */
 @Getter
 @Builder
@@ -23,10 +23,15 @@ public class PortfolioValuation {
     private String name;
     private PortfolioType type;
 
-    /** Positions + liquidités (si suivies). */
+    /** Positions + solde positif des liquidités (si suivies). */
     private BigDecimal currentValueEur;
-    /** Prix de revient des positions + liquidités (si suivies). */
+    /**
+     * Apports nets : versements - retraits + découvert (compte suivi), achats -
+     * ventes - dividendes (sans suivi). Peut être négatif sans suivi.
+     */
     private BigDecimal investedEur;
+    /** Prix de revient des positions détenues. */
+    private BigDecimal positionsCostEur;
     private BigDecimal unrealizedGainEur;
     /** Plus-value latente / prix de revient des positions (hors liquidités). */
     private BigDecimal unrealizedGainPercentage;

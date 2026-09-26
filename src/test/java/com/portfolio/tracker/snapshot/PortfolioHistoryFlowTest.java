@@ -139,7 +139,8 @@ class PortfolioHistoryFlowTest extends AbstractIntegrationTest {
         List<PortfolioSnapshot> curve = snapshotRepository.findByPortfolioIdOrderBySnapshotDateAsc(portfolioId);
         assertThat(at(curve, today.minusDays(4)).getTotalValue()).isEqualByComparingTo("1350.00");
         assertThat(at(curve, today.minusDays(3)).getTotalValue()).isEqualByComparingTo("675.00");
-        assertThat(at(curve, today.minusDays(3)).getTotalInvested()).isEqualByComparingTo("450.00");
+        // Apports nets sans suivi des liquidités : 900 € d'achat - 720 € de vente
+        assertThat(at(curve, today.minusDays(3)).getTotalInvested()).isEqualByComparingTo("180.00");
 
         // L'historique n'a été demandé qu'une fois par symbole
         verify(marketDataProvider, times(1)).getDailyHistory(eq(AAPL), any(), any());

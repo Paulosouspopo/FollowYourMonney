@@ -22,6 +22,41 @@ public final class DividendProjection {
         return events.stream().filter(e -> e.exDate().isAfter(from) && !e.exDate().isAfter(today)).toList();
     }
 
+    /**
+     * Versements par an (12, 4, 2 ou 1), d'après l'écart médian entre deux
+     * détachements sur deux ans. Compter les dividendes des 365 derniers jours
+     * ne suffit pas : une date décalée de quelques jours fait passer un
+     * trimestriel à 3 versements.
+     */
+    public static int paymentsPerYear(List<DividendEvent> events, LocalDate today) {
+        List<LocalDate> dates = events.stream().map(DividendEvent::exDate)
+                .filter(d -> d.isAfter(today.minusDays(730)) && !d.isAfter(today))
+                .sorted().toList();
+        if (dates.size() < 2) {
+            return 1;
+        }
+        List<Long> gaps = new java.util.ArrayList<>();
+        for (int i = 1; i < dates.size(); i++) {
+            gaps.add(java.time.temporal.ChronoUnit.DAYS.between(dates.get(i - 1), dates.get(i)));
+        }
+        java.util.Collections.sort(gaps);
+        long median = gaps.get(gaps.size() / 2);
+        return median <= 45 ? 12 : median <= 135 ? 4 : median <= 270 ? 2 : 1;
+    }
+
+    /**
+     * Le dernier cycle de versements : les {@link #paymentsPerYear} plus récents
+     * détachés depuis 400 jours au plus (tolère un calendrier qui glisse).
+     */
+    public static List<DividendEvent> lastCycle(List<DividendEvent> events, LocalDate today) {
+        int perYear = paymentsPerYear(events, today);
+        List<DividendEvent> recent = events.stream()
+                .filter(e -> e.exDate().isAfter(today.minusDays(400)) && !e.exDate().isAfter(today))
+                .sorted(java.util.Comparator.comparing(DividendEvent::exDate))
+                .toList();
+        return recent.subList(Math.max(0, recent.size() - perYear), recent.size());
+    }
+
     /** Montant annuel par action (somme des 12 derniers mois). */
     public static BigDecimal perShare(List<DividendEvent> lastYear) {
         return lastYear.stream().map(DividendEvent::amount).reduce(BigDecimal.ZERO, BigDecimal::add);
