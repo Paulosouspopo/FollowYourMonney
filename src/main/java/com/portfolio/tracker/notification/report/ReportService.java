@@ -29,6 +29,7 @@ import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -188,11 +189,13 @@ public class ReportService {
         record Move(String label, BigDecimal pct) {
         }
         List<Move> moves = new ArrayList<>();
+        // Nom de l'actif plutôt que son symbole Yahoo (« Fetch.ai », pas « FET-EUR »)
+        Map<String, String> names = new java.util.LinkedHashMap<>();
         valuation.getPortfolios().stream()
                 .flatMap(p -> p.getPositions().stream())
                 .filter(pos -> pos.getQuantity().signum() > 0 && !pos.isPriceMissing())
-                .map(PositionValuation::getSymbol)
-                .distinct()
+                .forEach(pos -> names.putIfAbsent(pos.getSymbol(), pos.getName() != null ? pos.getName() : pos.getSymbol()));
+        names.keySet()
                 .forEach(symbol -> {
                     Optional<DailyPrice> now = priceHistoryService.findOnOrBefore(symbol, today);
                     Optional<DailyPrice> base = priceHistoryService.findOnOrBefore(symbol, baseDay);
@@ -200,7 +203,7 @@ public class ReportService {
                             && !now.get().date().equals(base.get().date())) {
                         BigDecimal pct = now.get().price().subtract(base.get().price()).multiply(BigDecimal.valueOf(100))
                                 .divide(base.get().price(), 4, RoundingMode.HALF_UP);
-                        moves.add(new Move(symbol, pct));
+                        moves.add(new Move(names.get(symbol), pct));
                     }
                 });
         List<String> result = new ArrayList<>();

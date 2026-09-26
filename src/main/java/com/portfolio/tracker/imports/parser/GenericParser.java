@@ -44,7 +44,7 @@ public class GenericParser {
             List<Integer> lines = List.of(line.number());
             Optional<LocalDateTime> when = DateParsing.parse(line.cell(date));
             if (when.isEmpty()) {
-                result.add(ImportedOperation.ignored(lines, null, "Date illisible : « " + line.cell(date) + " »"));
+                result.add(ImportedOperation.error(lines, null, "Date illisible : « " + line.cell(date) + " »"));
                 continue;
             }
             String rawType = line.cell(type);
@@ -66,7 +66,7 @@ public class GenericParser {
             }
             String assetValue = line.cell(asset);
             if (assetValue.isEmpty()) {
-                result.add(ImportedOperation.ignored(lines, when.get(), "Actif manquant"));
+                result.add(ImportedOperation.error(lines, when.get(), "Actif manquant"));
                 continue;
             }
             b.asset(AssetRef.guess(assetValue));

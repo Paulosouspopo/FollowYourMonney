@@ -100,7 +100,8 @@ class NotificationFlowTest extends AbstractIntegrationTest {
         List<Notification> inbox = notificationService.recent(user.getId(), 10);
         assertThat(inbox).singleElement().satisfies(n -> {
             assertThat(n.getType()).isEqualTo(Notification.Type.ALERT);
-            assertThat(n.getTitle()).contains("FAKE").contains("+10");
+            // Nom de l'actif, pas son symbole Yahoo
+            assertThat(n.getTitle()).contains("Fake Corp").doesNotContain("FAKE").contains("+10");
         });
 
         assertThat(evaluator.evaluateAll()).isZero(); // toujours +10 % : pas de rappel

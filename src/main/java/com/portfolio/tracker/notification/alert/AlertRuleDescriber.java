@@ -12,7 +12,7 @@ public final class AlertRuleDescriber {
         return switch (r.getScope()) {
             case GLOBAL -> "Patrimoine total";
             case PORTFOLIO -> r.getPortfolio() != null ? r.getPortfolio().getName() : "Portefeuille";
-            case ASSET -> r.getAssetName() != null ? r.getAssetName() + " (" + r.getSymbol() + ")" : r.getSymbol();
+            case ASSET -> r.getAssetName() != null ? r.getAssetName() : r.getSymbol();
         };
     }
 

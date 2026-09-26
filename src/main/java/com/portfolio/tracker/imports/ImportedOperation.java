@@ -57,4 +57,9 @@ public class ImportedOperation {
     public static ImportedOperation ignored(List<Integer> lines, LocalDateTime dateTime, String reason) {
         return ImportedOperation.builder().lines(lines).dateTime(dateTime).status(RowStatus.IGNORED).message(reason).build();
     }
+
+    /** Ligne illisible (date, actif manquant) : à corriger dans le fichier, pas volontairement écartée. */
+    public static ImportedOperation error(List<Integer> lines, LocalDateTime dateTime, String reason) {
+        return ImportedOperation.builder().lines(lines).dateTime(dateTime).status(RowStatus.ERROR).message(reason).build();
+    }
 }

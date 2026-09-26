@@ -319,6 +319,7 @@ public class ImportService {
             keys.add(cashKey(m.getMovementDate(), m.getType().name(), m.getAmount()));
         });
 
+        Set<String> seenInFile = new HashSet<>();
         for (ImportedOperation op : operations) {
             if (op.getStatus() != RowStatus.READY) {
                 continue;
@@ -337,6 +338,12 @@ public class ImportService {
             if (key != null && keys.contains(key)) {
                 op.setStatus(RowStatus.DUPLICATE);
                 op.setMessage("Une opération identique existe déjà (même jour, même montant)");
+                continue;
+            }
+            // Deux lignes identiques dans le même relevé : la seconde est proposée comme doublon
+            if (key != null && !seenInFile.add(key)) {
+                op.setStatus(RowStatus.DUPLICATE);
+                op.setMessage("Identique à une autre ligne du relevé : coche-la si c'est bien une deuxième opération");
                 continue;
             }
             // Le relevé contient l'exécution réelle d'un achat déjà créé (prix estimé) par un plan

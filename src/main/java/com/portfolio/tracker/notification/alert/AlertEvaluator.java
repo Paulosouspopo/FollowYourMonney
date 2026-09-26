@@ -171,7 +171,7 @@ public class AlertEvaluator {
     }
 
     private static String title(AlertRule rule, BigDecimal value) {
-        String subject = rule.getScope() == AlertRule.Scope.ASSET ? rule.getSymbol() : AlertRuleDescriber.subject(rule);
+        String subject = AlertRuleDescriber.subject(rule);
         return switch (rule.getCondition()) {
             case RISES, FALLS, MOVES -> {
                 String icon = value.signum() >= 0 ? "📈" : "📉";
