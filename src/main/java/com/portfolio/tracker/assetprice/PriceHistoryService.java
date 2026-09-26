@@ -1,5 +1,7 @@
 package com.portfolio.tracker.assetprice;
 
+import com.portfolio.tracker.asset.ManualAssets;
+
 import com.portfolio.tracker.assetprice.dto.DailyPrice;
 import com.portfolio.tracker.marketdata.MarketDataProvider;
 import com.portfolio.tracker.marketdata.MarketDataUnavailableException;
@@ -68,8 +70,8 @@ public class PriceHistoryService {
      * @return false si une plage n'a pas pu être récupérée (à retenter plus tard)
      */
     public boolean ensureCoverage(String symbol, LocalDate from) {
-        if (symbol == null || symbol.isBlank() || from == null) {
-            return true;
+        if (symbol == null || symbol.isBlank() || from == null || ManualAssets.isManual(symbol)) {
+            return true; // actif non coté : ses valeurs sont saisies, rien à télécharger
         }
         LocalDate today = LocalDate.now();
         LocalDate yesterday = today.minusDays(1);

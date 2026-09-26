@@ -6,5 +6,11 @@ package com.portfolio.tracker.auth.dto;
  */
 public record AuthResponse(
         String accessToken,
-        long expiresIn
-) {}
+        long expiresIn,
+        /** Double authentification active : pas de session, ce jeton (5 min) accompagne le code. */
+        String twoFactorToken
+) {
+    public AuthResponse(String accessToken, long expiresIn) {
+        this(accessToken, expiresIn, null);
+    }
+}

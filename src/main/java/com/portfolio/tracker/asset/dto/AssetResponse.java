@@ -14,6 +14,8 @@ public record AssetResponse(
         String exchangeName,
         AssetType assetType,
         String currency,
+        /** Actif non coté : valeurs saisies par l'utilisateur. */
+        boolean manual,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {}

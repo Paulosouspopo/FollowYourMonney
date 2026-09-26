@@ -48,6 +48,7 @@ public class TransactionService {
         private final ExchangeRateService exchangeRateService;
         private final TransactionMapper transactionMapper;
         private final ApplicationEventPublisher eventPublisher;
+        private final com.portfolio.tracker.trash.TrashRecorder trashRecorder;
 
         // ---------------------------------------------------------------- lectures
 
@@ -240,8 +241,9 @@ public class TransactionService {
 
         // --------------------------------------------------------------- supression
 
+        /** @return identifiant de l'opération dans la corbeille (restaurable 30 jours) */
         @Transactional
-        public void deleteById(UUID transactionId, UUID userId) {
+        public UUID deleteById(UUID transactionId, UUID userId) {
                 Transaction transaction = transactionRepository.findByIdAndUserId(transactionId, userId)
                                 .orElseThrow(() -> new ResourceNotFoundException("Transaction non accessible"));
                 // Supprimer un achat ne doit pas rendre une vente ultérieure impossible
@@ -249,11 +251,13 @@ public class TransactionService {
                                 .findByAssetIdAndUserId(transaction.getAsset().getId(), userId).stream()
                                 .filter(t -> !t.getId().equals(transactionId))
                                 .toList());
+                UUID trashId = trashRecorder.record(userId, transaction);
                 transactionRepository.delete(transaction);
 
                 eventPublisher.publishEvent(new PortfolioHistoryChangedEvent(
                                 transaction.getAsset().getPortfolio().getId(),
                                 transaction.getTransactionDate().toLocalDate()));
+                return trashId;
         }
 
         /**

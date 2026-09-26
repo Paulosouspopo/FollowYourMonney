@@ -98,8 +98,9 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
   (`priceMissing = true`), dashboard comme courbe.
 
 ## Liquidités et livrets
-- `CashMovement` (versement, retrait, intérêts, frais de compte), en EUR,
-  montant toujours positif (le type donne le sens). API :
+- `CashMovement` (versement, retrait, intérêts, frais de compte, abondement,
+  change), en EUR sauf compte multidevise, montant toujours positif (le type
+  donne le sens). API :
   `/api/portfolios/{id}/cash-movements`.
 - `Portfolio.cashTracking` : le solde entre dans la valeur. Forcé pour un
   LIVRET (`PortfolioRules`), optionnel ailleurs ; mouvements refusés si
@@ -273,6 +274,120 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
   3VG/3VH, 2DC, 3AN/3BN, flat tax 30 %, PEA (5 ans depuis `opened_at` (V11)
   ou la 1re opération, plafond 150 000 €, versements estimés sans suivi des
   liquidités, 17,2 % en cas de retrait). Estimation : l'IFU fait foi.
+
+## Enveloppes, actifs non cotés, devises (V13)
+- `PortfolioType` : ASSURANCE_VIE, PER, EPARGNE_SALARIALE (= « enveloppes à
+  versements », `PortfolioRules.isSavingsWrapper`) : liquidités toujours
+  suivies. Le solde = fonds euros (AV, PER, rémunéré au taux
+  `annualInterestRate`) ou sommes à investir (épargne salariale). Leurs ventes
+  et dividendes internes sont exclus de la fiscalité compte-titres
+  (`PortfolioRules.isTaxSheltered`, avec PEA et livrets).
+- `CashMovementType.ABONDEMENT` (épargne salariale, PER) : apport compté dans
+  `netDepositsEur` (performance) et suivi à part (`employerContributionsEur`).
+- **Compte multidevise** (`Portfolio.multiCurrencyCash`, exige le suivi des
+  liquidités) : une opération en devise est réglée dans sa devise.
+  `CashMovement.currency` + `exchangeRateToEur` (taux du jour du mouvement) ;
+  `CONVERSION` = change (`amount` en `currency` → `counterAmount` en
+  `counterCurrency`, ni apport ni retrait). `CashState` tient un solde par
+  devise ; `valueEur(taux)` les valorise : taux du jour pour le dashboard, taux
+  historique du jour dans le `rebuild` (paires chargées avec le reste, aucune
+  requête dans la boucle). Apports, intérêts et frais figés en euros au taux du
+  mouvement. Mouvement en devise refusé sur un compte en euros ; repasser en
+  euros refusé tant qu'il en existe.
+- `AssetType.FONDS` : Yahoo `MUTUALFUND` (OPCVM, unités de compte) remonte
+  maintenant dans la recherche.
+- **Actif non coté** (`asset/manual`, `Asset.manual`) : symbole interne
+  `~XXXXXXXXXXXX` (`ManualAssets`, jamais envoyé à Yahoo : garde-fous dans
+  `YahooFinanceClient`, `PriceHistoryService.ensureCoverage`, la cotation
+  horaire). Ses valeurs liquidatives saisies sont des lignes `asset_prices`
+  (source MANUAL, `lastUpdated` = date du relevé) : valorisation, courbe et
+  repli « dernier cours / prix de la dernière opération » sans cas particulier.
+  API : `GET|POST /api/portfolios/{id}/manual-assets`,
+  `GET|PUT /api/portfolios/{id}/assets/{assetId}/valuations`,
+  `DELETE …/valuations/{date}`.
+- **Intérêts estimés** (`InterestEstimator`, pur, testé) : livret = règle des
+  quinzaines, fonds euros = prorata journalier (achats d'UC déduits).
+  `GET /api/portfolios/{id}/cash-movements/interest-estimate?year=` (estimé,
+  année close ou non, déjà crédité) : le front pré-remplit le mouvement.
+- Fiscalité : `users.marginal_tax_rate` (0/11/30/41/45, `PUT /api/tax/settings`) ;
+  `/api/tax` ajoute PER (versements de l'année, case 6NS, économie = versements
+  × tranche), assurance-vie (8 ans depuis `opened_at` ou la 1re opération,
+  part de gains des rachats au prorata gain/valeur, abattement rappelé ; pas de
+  case : l'IFU de l'assureur fait foi), épargne salariale (abondement, 17,2 %).
+- Répartition : catégorie `FONDS_EUROS` pour le solde d'une AV ou d'un PER.
+
+## Radiographie (`analysis/`, V14)
+- Profil de marché d'un actif (`MarketDataProvider.getProfile`) : Yahoo
+  `quoteSummary` (modules assetProfile, topHoldings, fundProfile, quoteType)
+  via `YahooQuoteSummaryClient` : cet endpoint exige un cookie (fc.yahoo.com)
+  et un « crumb » (`/v1/test/getcrumb`), renouvelés sur 401/403. Action : pays
+  et secteur. ETF / fonds : secteurs, 10 premières lignes (souvent absentes
+  pour les ETF européens), répartition actions/obligations, frais (TER).
+  Yahoo ne donne JAMAIS les pays d'un ETF.
+- `AssetProfileService` : cache `asset_profiles` (30 jours, 1 jour après un
+  échec), réseau hors transaction ; actifs non cotés et cryptos exclus.
+- `ExposureCalculator` (pur, testé) : classes d'actifs (fonds décomposés),
+  pays et secteurs sur la partie actions, devises économiques (pays → devise),
+  expositions réelles (actions en direct + lignes des fonds), concentration,
+  frais (TER Yahoo ou saisi `assets.annual_fee_pct`, coût sur 20 ans à 5 %).
+  Pays d'un ETF estimés d'après l'indice cité dans son nom (`Geography`,
+  répartition approximative des grands indices ; « non déterminé » sinon).
+- `ContributionService` : gain de chaque ligne sur une période = valeur finale
+  − valeur la veille du début − flux (achats − ventes − dividendes nets), cours
+  et taux lus en base (aucun appel réseau).
+- `RiskCalculator` (pur, testé), dans `/api/performance` (`risk`) :
+  volatilité (jours ouvrés, √252), pire baisse et dates, Sharpe (> 1 an, sans
+  risque 2 %), meilleur / pire jour ; null sous 20 jours ouvrés.
+- API : `GET /api/analysis/exposure?portfolioId=`,
+  `GET /api/analysis/contributions?period=&portfolioId=`,
+  `PUT /api/analysis/fees {symbol, annualFeePct}` (toutes les lignes du symbole).
+
+## Confort (v5, lot C)
+- **Crédit d'impôt 2AB** (`ForeignDividendCredit`, pur, testé) : dividendes
+  d'ACTIONS étrangères × taux de la convention (15 % US/DE/CH…, 10 % JP, 0 %
+  GB), plafonné à 12,8 % ; pays = profil en cache, sinon suffixe Yahoo (sans
+  suffixe = US). Déduit de l'impôt estimé.
+- **Corbeille** (`trash/`, V15) : `TrashRecorder` (sans dépendance métier)
+  enregistre un instantané JSON avant chaque suppression d'opération, de
+  mouvement ou de portefeuille (avec ses opérations et mouvements) ;
+  `TrashService.restore` recrée en repassant par les services (mêmes règles,
+  `external_ref` conservée, actif non coté recréé avec son symbole), une seule
+  transaction. Suppressions : en-tête `X-Trash-Id` (exposé en CORS) pour le
+  bouton « Annuler ». Purge à 30 jours (`TrashJobs`). API `/api/trash`.
+  Supprimer un portefeuille supprime explicitement ses mouvements chargés.
+- **Bilan de l'année** (`wrapped/`) : `GET /api/wrapped?year=` (performance
+  comparée à CW8.PA, mois par mois, lignes star/boulet, revenus, opérations,
+  profil ludique). `PerformanceService.between` et
+  `ContributionService.between` calculent sur une période quelconque.
+- **Mode démo** (`demo/`, V16 `users.demo`) : `POST /api/auth/demo` (5/h par
+  IP, 300 comptes vivants max) crée un invité `demo-…@demo.invalid` rempli par
+  `DemoSeeder` (3 ans aux vrais cours via `MarketPriceLookup` : PEA en DCA +
+  actions, crypto, Livret A, assurance-vie avec fonds non coté, objectif ; le
+  plan programmé est créé après commit car l'exécuteur a sa propre
+  transaction) puis ouvre la session. `DemoJobs` supprime les invités de plus
+  de 24 h (snapshots d'abord). `UserResponse.demo`.
+
+## Sécurité du compte et RGPD (v5, lot D, V17)
+- **Double authentification TOTP** (`auth/twofactor`) : `Totp` (RFC 6238,
+  HMAC-SHA1, 30 s, 6 chiffres, ± 1 pas, JDK seule, testé sur les vecteurs de
+  la RFC). Secret chiffré AES-256-GCM (`SecretCipher`, clé
+  `app.security.totp-key` à fixer en prod, sinon générée dans app_secrets).
+  Un code n'est jamais accepté deux fois (`users.totp_last_step`). 8 codes de
+  secours à usage unique (empreintes, `totp_recovery_codes`).
+  API `/api/account/2fa` (status, setup → otpauth URI, enable → codes,
+  disable avec mot de passe + code, recovery-codes).
+- Connexion : si la 2FA est active, `/api/auth/login` renvoie
+  `twoFactorToken` (account_tokens TWO_FACTOR, 5 min) sans session ;
+  `POST /api/auth/2fa/verify {token, code}` ouvre la session (limité à 5
+  essais par défi, 20 par IP / 15 min).
+- **Sessions actives** : `refresh_tokens` retient navigateur, IP, début de
+  session (conservé à chaque rotation) et dernière utilisation.
+  `GET /api/auth/sessions` (session courante = cookie présenté ; d'où
+  /api/auth, seul chemin du cookie), `DELETE /api/auth/sessions/{id}`.
+- **Export RGPD** (`account/`) : `GET /api/account/export` (JSON complet :
+  compte, portefeuilles, opérations, mouvements, plans, valeurs saisies,
+  objectifs, alertes, suivis), `GET /api/account/export/transactions.csv`
+  (format générique réimportable).
 
 ## Tutoriels (`tutorial/`)
 - `tutorial_states` (V12) : une ligne par compte, `auto_enabled` + clés des

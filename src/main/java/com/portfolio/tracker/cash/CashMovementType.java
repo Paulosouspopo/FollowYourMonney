@@ -11,7 +11,14 @@ public enum CashMovementType {
     /** Intérêts crédités (livret, rémunération des espèces). */
     INTEREST(1),
     /** Frais de tenue de compte, droits de garde... (hors frais de courtage). */
-    FEE(-1);
+    FEE(-1),
+    /** Abondement de l'employeur (épargne salariale, PER collectif) : un apport qui ne sort pas de ta poche. */
+    ABONDEMENT(1),
+    /**
+     * Change entre deux devises du compte : le montant quitte la devise du
+     * mouvement, la contrepartie arrive dans l'autre. Ni apport ni retrait.
+     */
+    CONVERSION(-1);
 
     private final int sign;
 

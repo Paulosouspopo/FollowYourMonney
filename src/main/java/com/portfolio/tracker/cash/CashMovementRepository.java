@@ -41,4 +41,11 @@ public interface CashMovementRepository extends JpaRepository<CashMovement, UUID
     List<CashMovement> findAllByPortfolioIdForHistory(@Param("portfolioId") UUID portfolioId);
 
     boolean existsByExternalRef(String externalRef);
+
+    /** Au moins un mouvement hors euros (devise ou change) sur ce portefeuille. */
+    @Query("""
+            SELECT COUNT(m) > 0 FROM CashMovement m
+            WHERE m.portfolio.id = :portfolioId AND (m.currency <> 'EUR' OR m.type = com.portfolio.tracker.cash.CashMovementType.CONVERSION)
+            """)
+    boolean existsForeignByPortfolioId(@Param("portfolioId") UUID portfolioId);
 }

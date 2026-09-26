@@ -19,6 +19,14 @@ import java.util.UUID;
 public class CashMovementController {
 
     private final CashMovementService service;
+    private final InterestEstimateService interestEstimateService;
+
+    /** Intérêts estimés d'une année (livret, fonds euros), pour pré-remplir le mouvement « Intérêts ». */
+    @GetMapping("/interest-estimate")
+    public InterestEstimateService.InterestEstimate interestEstimate(@PathVariable UUID portfolioId,
+            @RequestParam int year, @AuthenticationPrincipal CustomUserDetails user) {
+        return interestEstimateService.estimate(portfolioId, year, user.getId());
+    }
 
     /** Plus récents d'abord. */
     @GetMapping
@@ -46,7 +54,8 @@ public class CashMovementController {
     public ResponseEntity<Void> delete(@PathVariable UUID portfolioId,
             @PathVariable UUID movementId,
             @AuthenticationPrincipal CustomUserDetails user) {
-        service.delete(portfolioId, movementId, user.getId());
-        return ResponseEntity.noContent().build();
+        UUID trashId = service.delete(portfolioId, movementId, user.getId());
+        return ResponseEntity.noContent()
+                .header(com.portfolio.tracker.trash.TrashController.TRASH_ID_HEADER, trashId.toString()).build();
     }
 }

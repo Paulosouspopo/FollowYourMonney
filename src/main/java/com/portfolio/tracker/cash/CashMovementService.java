@@ -2,6 +2,8 @@ package com.portfolio.tracker.cash;
 
 import com.portfolio.tracker.cash.dto.CashMovementRequest;
 import com.portfolio.tracker.cash.dto.CashMovementResponse;
+import com.portfolio.tracker.exchangerate.ExchangeRateService;
+import com.portfolio.tracker.shared.MoneyConstants;
 import com.portfolio.tracker.portfolio.Portfolio;
 import com.portfolio.tracker.portfolio.PortfolioRepository;
 import com.portfolio.tracker.portfolio.PortfolioRules;
@@ -36,6 +38,8 @@ public class CashMovementService {
     private final PortfolioRepository portfolioRepository;
     private final CashMovementMapper mapper;
     private final ApplicationEventPublisher eventPublisher;
+    private final ExchangeRateService exchangeRateService;
+    private final com.portfolio.tracker.trash.TrashRecorder trashRecorder;
 
     public List<CashMovementResponse> findByPortfolio(UUID portfolioId, UUID userId) {
         getPortfolio(portfolioId, userId);
@@ -58,7 +62,7 @@ public class CashMovementService {
                     "Active le suivi des liquidités de ce portefeuille pour saisir des versements et retraits");
         }
         CashMovement movement = CashMovement.builder().portfolio(portfolio).externalRef(externalRef).build();
-        apply(movement, request);
+        apply(portfolio, movement, request);
 
         List<CashMovement> all = new ArrayList<>(movementRepository.findAllByPortfolioIdForHistory(portfolioId));
         all.add(movement);
@@ -73,7 +77,7 @@ public class CashMovementService {
     public CashMovementResponse update(UUID portfolioId, UUID movementId, CashMovementRequest request, UUID userId) {
         CashMovement movement = getMovement(portfolioId, movementId, userId);
         LocalDate previousDate = movement.getMovementDate();
-        apply(movement, request);
+        apply(movement.getPortfolio(), movement, request);
 
         // `movement` est l'instance gérée : la liste la contient déjà modifiée
         checkBalance(movement.getPortfolio(), movementRepository.findAllByPortfolioIdForHistory(portfolioId));
@@ -84,15 +88,18 @@ public class CashMovementService {
         return mapper.toResponse(saved);
     }
 
+    /** @return identifiant du mouvement dans la corbeille (restaurable 30 jours) */
     @Transactional
-    public void delete(UUID portfolioId, UUID movementId, UUID userId) {
+    public UUID delete(UUID portfolioId, UUID movementId, UUID userId) {
         CashMovement movement = getMovement(portfolioId, movementId, userId);
         // Supprimer un versement ne doit pas rendre un retrait ultérieur impossible
         checkBalance(movement.getPortfolio(), movementRepository.findAllByPortfolioIdForHistory(portfolioId).stream()
                 .filter(m -> !m.getId().equals(movementId))
                 .toList());
+        UUID trashId = trashRecorder.record(userId, movement);
         movementRepository.delete(movement);
         eventPublisher.publishEvent(new PortfolioHistoryChangedEvent(portfolioId, movement.getMovementDate()));
+        return trashId;
     }
 
     // ------------------------------------------------------------------ règles
@@ -118,9 +125,36 @@ public class CashMovementService {
         }
     }
 
-    private void apply(CashMovement movement, CashMovementRequest request) {
+    private void apply(Portfolio portfolio, CashMovement movement, CashMovementRequest request) {
+        String currency = request.currency() != null ? request.currency() : MoneyConstants.BASE_CURRENCY;
+        boolean conversion = request.type() == CashMovementType.CONVERSION;
+        boolean foreign = !MoneyConstants.BASE_CURRENCY.equals(currency)
+                || (conversion && !MoneyConstants.BASE_CURRENCY.equals(request.counterCurrency()));
+        if ((foreign || conversion) && !portfolio.isMultiCurrencyCash()) {
+            throw new BadRequestException(
+                    "Active « Compte multidevise » dans ce portefeuille pour saisir des montants en devises");
+        }
+        if (conversion) {
+            if (request.counterAmount() == null || request.counterCurrency() == null) {
+                throw new BadRequestException("Indique le montant reçu et sa devise");
+            }
+            if (request.counterCurrency().equals(currency)) {
+                throw new BadRequestException("Un change se fait entre deux devises différentes");
+            }
+        } else if (request.counterAmount() != null || request.counterCurrency() != null) {
+            throw new BadRequestException("Montant reçu réservé à un change entre devises");
+        }
+        if (request.type() == CashMovementType.ABONDEMENT
+                && !PortfolioRules.acceptsEmployerContribution(portfolio.getType())) {
+            throw new BadRequestException("L'abondement concerne l'épargne salariale et le PER");
+        }
         movement.setType(request.type());
         movement.setAmount(request.amount());
+        movement.setCurrency(currency);
+        movement.setExchangeRateToEur(exchangeRateService.getRateAsOf(currency, MoneyConstants.BASE_CURRENCY,
+                request.movementDate()));
+        movement.setCounterAmount(conversion ? request.counterAmount() : null);
+        movement.setCounterCurrency(conversion ? request.counterCurrency() : null);
         movement.setMovementDate(request.movementDate());
         movement.setNotes(request.notes());
     }

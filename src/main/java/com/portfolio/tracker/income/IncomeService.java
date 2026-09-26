@@ -82,8 +82,11 @@ public class IncomeService {
         BigDecimal payingCost = BigDecimal.ZERO;
 
         for (PortfolioValuation p : valuation.getPortfolios()) {
-            // Livret : intérêts au taux affiché, versés au 31 décembre
-            if (p.getType() == PortfolioType.LIVRET) {
+            // Livret, fonds euros d'une assurance-vie / d'un PER : intérêts au taux affiché, versés au 31 décembre
+            boolean interestBearing = p.getType() == PortfolioType.LIVRET
+                    || (com.portfolio.tracker.portfolio.PortfolioRules.isSavingsWrapper(p.getType())
+                            && p.getAnnualInterestRate() != null);
+            if (interestBearing) {
                 if (p.getAnnualInterestRate() != null && p.getCashEur() != null && p.getCashEur().signum() > 0) {
                     BigDecimal annual = p.getCashEur().multiply(p.getAnnualInterestRate()).movePointLeft(2);
                     positions.add(new PositionIncome(p.getPortfolioId(), p.getName(), null, p.getName(), null,
@@ -92,7 +95,9 @@ public class IncomeService {
                     upcoming.add(new UpcomingPayment(LocalDate.of(today.getYear(), 12, 31), null, p.getName(),
                             money(annual), "INTEREST", true));
                 }
-                continue;
+                if (p.getType() == PortfolioType.LIVRET) {
+                    continue; // un livret n'a pas de lignes
+                }
             }
             for (PositionValuation pos : p.getPositions()) {
                 if (pos.getQuantity() == null || pos.getQuantity().signum() <= 0

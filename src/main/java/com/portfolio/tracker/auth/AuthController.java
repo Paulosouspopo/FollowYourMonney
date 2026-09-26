@@ -36,6 +36,7 @@ public class AuthController {
     private final AuthService authService;
     private final RefreshCookie refreshCookie;
     private final RateLimiter rateLimiter;
+    private final com.portfolio.tracker.demo.DemoService demoService;
 
     @PostMapping("/register")
     public ResponseEntity<UserResponse> register(@Valid @RequestBody UserCreateRequest request,
@@ -48,7 +49,41 @@ public class AuthController {
     public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request, HttpServletRequest http) {
         rateLimiter.check("login-ip:" + http.getRemoteAddr(), 20, QUARTER_HOUR);
         rateLimiter.check("login-email:" + request.email().toLowerCase(), 10, QUARTER_HOUR);
-        return withSession(authService.login(request.email(), request.password()));
+        AuthService.LoginOutcome outcome = authService.login(request.email(), request.password(), device(http));
+        if (outcome.twoFactorToken() != null) {
+            return ResponseEntity.ok(new AuthResponse(null, 0, outcome.twoFactorToken()));
+        }
+        return withSession(outcome.session());
+    }
+
+    /** Second facteur : { "token": défi reçu à la connexion, "code": code de l'application ou de secours }. */
+    @PostMapping("/2fa/verify")
+    public ResponseEntity<AuthResponse> verifyTwoFactor(@RequestBody java.util.Map<String, String> body,
+            HttpServletRequest http) {
+        rateLimiter.check("2fa-ip:" + http.getRemoteAddr(), 20, QUARTER_HOUR);
+        rateLimiter.check("2fa-token:" + body.getOrDefault("token", ""), 5, QUARTER_HOUR);
+        return withSession(authService.verifyTwoFactor(body.get("token"), body.get("code"), device(http)));
+    }
+
+    /** Sessions en cours (appareils) ; le cookie de cet appareil identifie la session courante. */
+    @GetMapping("/sessions")
+    public java.util.List<AuthService.SessionInfo> sessions(
+            @CookieValue(name = RefreshCookie.NAME, required = false) String token,
+            @AuthenticationPrincipal CustomUserDetails user) {
+        return authService.sessions(user.getId(), token);
+    }
+
+    @DeleteMapping("/sessions/{id}")
+    public ResponseEntity<Void> revokeSession(@PathVariable java.util.UUID id, @AuthenticationPrincipal CustomUserDetails user) {
+        authService.revokeSession(user.getId(), id);
+        return ResponseEntity.noContent().build();
+    }
+
+    /** Mode démo : compte invité rempli d'un patrimoine fictif, connecté aussitôt (supprimé après 24 h). */
+    @PostMapping("/demo")
+    public ResponseEntity<AuthResponse> demo(HttpServletRequest http) {
+        rateLimiter.check("demo:" + http.getRemoteAddr(), 5, HOUR);
+        return withSession(demoService.start(device(http)));
     }
 
     /** Nouveau jeton d'accès à partir du cookie ; appelé aussi au chargement de l'app. */
@@ -56,7 +91,7 @@ public class AuthController {
     public ResponseEntity<AuthResponse> refresh(@CookieValue(name = RefreshCookie.NAME, required = false) String token,
             HttpServletRequest http) {
         rateLimiter.check("refresh:" + http.getRemoteAddr(), 120, QUARTER_HOUR);
-        return withSession(authService.refresh(token));
+        return withSession(authService.refresh(token, device(http)));
     }
 
     @PostMapping("/logout")
@@ -108,12 +143,17 @@ public class AuthController {
     /** Authentifié : les autres appareils sont déconnectés, l'appareil courant reçoit une nouvelle session. */
     @PostMapping("/change-password")
     public ResponseEntity<AuthResponse> changePassword(@Valid @RequestBody ChangePasswordRequest request,
-            @AuthenticationPrincipal CustomUserDetails user) {
+            @AuthenticationPrincipal CustomUserDetails user, HttpServletRequest http) {
         rateLimiter.check("change-password:" + user.getId(), 10, HOUR);
-        return withSession(authService.changePassword(user.getId(), request.currentPassword(), request.newPassword()));
+        return withSession(authService.changePassword(user.getId(), request.currentPassword(), request.newPassword(),
+                device(http)));
     }
 
     // ------------------------------------------------------------------ utils
+
+    private static AuthService.Device device(HttpServletRequest http) {
+        return new AuthService.Device(http.getHeader(HttpHeaders.USER_AGENT), http.getRemoteAddr());
+    }
 
     private ResponseEntity<AuthResponse> withSession(AuthService.Session session) {
         return ResponseEntity.ok()

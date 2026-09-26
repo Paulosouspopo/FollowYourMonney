@@ -23,6 +23,8 @@ public class PortfolioMapper {
                 .description(request.description())
                 .type(request.type())
                 .cashTracking(PortfolioRules.cashTracking(request.type(), request.cashTracking()))
+                .multiCurrencyCash(PortfolioRules.cashTracking(request.type(), request.cashTracking())
+                        && Boolean.TRUE.equals(request.multiCurrencyCash()))
                 .annualInterestRate(request.annualInterestRate())
                 .openedAt(request.openedAt())
                 .user(user)
@@ -36,6 +38,7 @@ public class PortfolioMapper {
                 portfolio.getDescription(),
                 portfolio.getType(),
                 portfolio.isCashTracking(),
+                portfolio.isMultiCurrencyCash(),
                 portfolio.getAnnualInterestRate(),
                 portfolio.getOpenedAt(),
                 portfolio.getUser().getId(),
@@ -56,6 +59,7 @@ public class PortfolioMapper {
                 portfolio.getDescription(),
                 portfolio.getType(),
                 portfolio.isCashTracking(),
+                portfolio.isMultiCurrencyCash(),
                 portfolio.getAnnualInterestRate(),
                 portfolio.getUser().getId(),
                 assets,

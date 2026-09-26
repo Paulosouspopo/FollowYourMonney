@@ -28,6 +28,7 @@ public class AssetMapper {
                 asset.getExchangeName(),
                 asset.getAssetType(),
                 asset.getCurrency(),
+                asset.isManual(),
                 asset.getCreatedAt(),
                 asset.getUpdatedAt()
         );

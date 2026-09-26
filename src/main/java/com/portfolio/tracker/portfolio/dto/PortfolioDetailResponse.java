@@ -14,6 +14,7 @@ public record PortfolioDetailResponse(
         String description,
         PortfolioType type,
         boolean cashTracking,
+        boolean multiCurrencyCash,
         BigDecimal annualInterestRate,
         UUID userId,
         List<AssetResponse> assets,

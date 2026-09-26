@@ -1,5 +1,7 @@
 package com.portfolio.tracker.marketdata.yahoo;
 
+import com.portfolio.tracker.asset.ManualAssets;
+
 import com.portfolio.tracker.asset.AssetType;
 import com.portfolio.tracker.marketdata.AssetSearchResult;
 import com.portfolio.tracker.marketdata.MarketDataProvider;
@@ -44,19 +46,31 @@ public class YahooFinanceClient implements MarketDataProvider {
     private static final BigDecimal MINOR_UNIT_DIVISOR = BigDecimal.valueOf(100);
 
     private final RestClient restClient;
+    private final YahooQuoteSummaryClient quoteSummary;
 
     public YahooFinanceClient(@Value("${app.yahoo.base-url}") String baseUrl,
-            @Value("${app.yahoo.user-agent}") String userAgent) {
+            @Value("${app.yahoo.user-agent}") String userAgent, YahooQuoteSummaryClient quoteSummary) {
+        this.quoteSummary = quoteSummary;
         this.restClient = RestClient.builder()
                 .baseUrl(baseUrl)
                 .defaultHeader("User-Agent", userAgent)
                 .build();
     }
 
+    // ---------------------------------------------------------------- profil
+
+    @Override
+    public Optional<com.portfolio.tracker.marketdata.AssetProfile> getProfile(String symbol) {
+        return ManualAssets.isManual(symbol) ? Optional.empty() : quoteSummary.profile(symbol);
+    }
+
     // ------------------------------------------------------------------ quote
 
     @Override
     public Optional<MarketQuote> getQuote(String symbol) {
+        if (ManualAssets.isManual(symbol)) {
+            return Optional.empty();
+        }
         try {
             YahooChartResponse response = restClient.get()
                     .uri("/v8/finance/chart/{symbol}?range=1d&interval=1d", symbol)
@@ -73,6 +87,9 @@ public class YahooFinanceClient implements MarketDataProvider {
 
     @Override
     public List<MarketPricePoint> getDailyHistory(String symbol, LocalDate from, LocalDate to) {
+        if (ManualAssets.isManual(symbol)) {
+            return List.of();
+        }
         long period1 = from.atStartOfDay(ZoneOffset.UTC).toEpochSecond();
         long period2 = to.plusDays(1).atStartOfDay(ZoneOffset.UTC).toEpochSecond();
         YahooChartResponse response;
@@ -99,6 +116,9 @@ public class YahooFinanceClient implements MarketDataProvider {
 
     @Override
     public List<com.portfolio.tracker.marketdata.DividendEvent> getDividends(String symbol, LocalDate from, LocalDate to) {
+        if (ManualAssets.isManual(symbol)) {
+            return List.of();
+        }
         long period1 = from.atStartOfDay(ZoneOffset.UTC).toEpochSecond();
         long period2 = to.plusDays(1).atStartOfDay(ZoneOffset.UTC).toEpochSecond();
         YahooChartResponse response;
@@ -251,6 +271,7 @@ public class YahooFinanceClient implements MarketDataProvider {
         return switch (yahooType.toUpperCase()) {
             case "EQUITY" -> AssetType.ACTION;
             case "ETF" -> AssetType.ETF;
+            case "MUTUALFUND" -> AssetType.FONDS;
             case "CRYPTOCURRENCY" -> AssetType.CRYPTO;
             default -> null;
         };

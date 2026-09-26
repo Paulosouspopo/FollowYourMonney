@@ -19,6 +19,8 @@ import java.math.BigDecimal;
 public class AllocationSliceDTO {
 
     public static final String CASH = "LIQUIDITES";
+    /** Fonds euros (liquidités d'une assurance-vie ou d'un PER). */
+    public static final String EURO_FUND = "FONDS_EUROS";
 
     private String category;
     private BigDecimal value;

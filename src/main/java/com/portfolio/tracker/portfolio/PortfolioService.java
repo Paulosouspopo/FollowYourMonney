@@ -1,5 +1,6 @@
 package com.portfolio.tracker.portfolio;
 
+import com.portfolio.tracker.cash.CashMovementRepository;
 import com.portfolio.tracker.portfolio.dto.PortfolioCreateRequest;
 import com.portfolio.tracker.portfolio.dto.PortfolioDetailResponse;
 import com.portfolio.tracker.portfolio.dto.PortfolioResponse;
@@ -29,6 +30,9 @@ public class PortfolioService {
     private final PortfolioMapper portfolioMapper;
     private final PortfolioSnapshotRepository snapshotRepository;
     private final ApplicationEventPublisher eventPublisher;
+    private final CashMovementRepository cashMovementRepository;
+    private final com.portfolio.tracker.transaction.TransactionRepository transactionRepository;
+    private final com.portfolio.tracker.trash.TrashRecorder trashRecorder;
 
     public List<PortfolioResponse> findByUserId(UUID userId) {
         return portfolioRepository.findByUserId(userId).stream()
@@ -75,13 +79,21 @@ public class PortfolioService {
                     "Ce portefeuille contient des actifs : il ne peut pas devenir un livret");
         }
         boolean cashTracking = PortfolioRules.cashTracking(request.type(), request.cashTracking());
-        // Le suivi des liquidités change la valeur de tout l'historique
-        boolean historyChanged = cashTracking != portfolio.isCashTracking();
+        boolean multiCurrency = cashTracking && Boolean.TRUE.equals(request.multiCurrencyCash());
+        if (!multiCurrency && portfolio.isMultiCurrencyCash()
+                && cashMovementRepository.existsForeignByPortfolioId(portfolioId)) {
+            throw new BadRequestException(
+                    "Ce compte a des mouvements en devises : supprime-les avant de repasser en euros seulement");
+        }
+        // Suivi des liquidités et règlement en devises changent la valeur de tout l'historique
+        boolean historyChanged = cashTracking != portfolio.isCashTracking()
+                || multiCurrency != portfolio.isMultiCurrencyCash();
 
         portfolio.setName(request.name());
         portfolio.setDescription(request.description());
         portfolio.setType(request.type());
         portfolio.setCashTracking(cashTracking);
+        portfolio.setMultiCurrencyCash(multiCurrency);
         portfolio.setAnnualInterestRate(request.annualInterestRate());
         portfolio.setOpenedAt(request.openedAt());
 
@@ -92,13 +104,20 @@ public class PortfolioService {
         return portfolioMapper.toResponse(saved);
     }
 
+    /** @return identifiant du portefeuille dans la corbeille (restaurable 30 jours avec ses opérations) */
     @Transactional
-    public void deleteById(UUID portfolioId, UUID userId) {
+    public UUID deleteById(UUID portfolioId, UUID userId) {
         Portfolio portfolio = portfolioRepository.findByIdAndUserId(portfolioId, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Portfolio non accessible"));
+        var movements = cashMovementRepository.findAllByPortfolioIdForHistory(portfolioId);
+        UUID trashId = trashRecorder.record(userId, portfolio,
+                transactionRepository.findAllByPortfolioIdForHistory(portfolioId), movements);
+        // Chargés pour la corbeille : à supprimer explicitement (sinon ils référencent un portefeuille supprimé)
+        cashMovementRepository.deleteAll(movements);
 
         // Les snapshots référencent le portefeuille (FK) sans cascade JPA
         snapshotRepository.deleteByPortfolioId(portfolioId);
         portfolioRepository.delete(portfolio);
+        return trashId;
     }
 }

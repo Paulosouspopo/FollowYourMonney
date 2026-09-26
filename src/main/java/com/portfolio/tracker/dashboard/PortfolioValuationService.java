@@ -128,13 +128,14 @@ public class PortfolioValuationService {
         BigDecimal fees = sum(positions, PositionValuation::getTotalFeesEur);
 
         // Liquidités (règles dans CashState) : ignorées si le suivi est désactivé
-        CashState cash = new CashState();
+        CashState cash = new CashState(portfolio.isMultiCurrencyCash());
         if (portfolio.isCashTracking()) {
             movements.forEach(cash::apply);
             portfolioTxs.forEach(cash::apply);
             fees = fees.add(cash.getAccountFeesEur());
         }
-        BigDecimal cashEur = scale(cash.getBalanceEur());
+        // Soldes en devises : taux du jour (comme les positions)
+        BigDecimal cashEur = scale(cash.valueEur(c -> fxSession.rate(c, MoneyConstants.BASE_CURRENCY)));
 
         long openCount = positions.stream().filter(p -> p.getQuantity().signum() > 0).count();
 
@@ -153,11 +154,26 @@ public class PortfolioValuationService {
                 .cashTracking(portfolio.isCashTracking())
                 .cashEur(cashEur)
                 .netDepositsEur(scale(cash.getNetDepositsEur()))
+                .employerContributionsEur(scale(cash.getEmployerContributionsEur()))
+                .multiCurrencyCash(portfolio.isMultiCurrencyCash())
+                .cashBalances(cashBalances(cash, fxSession))
                 .annualInterestRate(portfolio.getAnnualInterestRate())
                 .positions(positions)
                 .openPositionCount((int) openCount)
                 .hasIncompletePrices(positions.stream().anyMatch(PositionValuation::isPriceMissing))
                 .build();
+    }
+
+    /** Détail des soldes par devise (euros d'abord) ; vide si le compte n'a que des euros. */
+    private static List<CashBalance> cashBalances(CashState cash, CurrencyConverter.Session fxSession) {
+        if (cash.getForeignBalances().isEmpty()) {
+            return List.of();
+        }
+        List<CashBalance> out = new ArrayList<>();
+        out.add(new CashBalance(MoneyConstants.BASE_CURRENCY, scale(cash.getBalanceEur()), scale(cash.getBalanceEur())));
+        cash.getForeignBalances().forEach((currency, amount) -> out.add(new CashBalance(currency, scale(amount),
+                scale(amount.multiply(fxSession.rate(currency, MoneyConstants.BASE_CURRENCY))))));
+        return out;
     }
 
     private static BigDecimal scale(BigDecimal v) {

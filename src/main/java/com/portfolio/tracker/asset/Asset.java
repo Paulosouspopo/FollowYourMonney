@@ -55,6 +55,18 @@ public class Asset {
      */
     private String exchangeName;
 
+    /**
+     * Actif non coté (fonds absent de Yahoo, FCPE…) : valeurs saisies par
+     * l'utilisateur, symbole interne (voir {@link ManualAssets}).
+     */
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean manual = false;
+
+    /** Frais courants annuels (TER, en %) renseignés par l'utilisateur, prioritaires sur ceux de Yahoo. */
+    @Column(name = "annual_fee_pct", precision = 6, scale = 3)
+    private java.math.BigDecimal annualFeePct;
+
     @OneToMany(mappedBy = "asset", cascade = CascadeType.ALL)
     private List<Transaction> transactions;
 

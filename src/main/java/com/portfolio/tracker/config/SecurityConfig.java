@@ -61,7 +61,8 @@ public class SecurityConfig {
                         .accessDeniedHandler(securityErrorHandler))
                 .authorizeHttpRequests(auth -> auth
                         // Actions sur la session courante : authentification requise
-                        .requestMatchers("/api/auth/logout-all", "/api/auth/change-password").authenticated()
+                        .requestMatchers("/api/auth/logout-all", "/api/auth/change-password", "/api/auth/sessions",
+                                "/api/auth/sessions/**").authenticated()
                         .requestMatchers("/api/auth/**").permitAll()
                         // Opérations de maintenance (backfill, refresh manuel des cours)
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")

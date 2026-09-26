@@ -30,11 +30,20 @@ public record PortfolioCreateRequest(
 
         /** Date d'ouverture du compte (facultative ; PEA : départ des 5 ans). */
         @jakarta.validation.constraints.PastOrPresent(message = "La date d'ouverture ne peut pas être dans le futur")
-        java.time.LocalDate openedAt
+        java.time.LocalDate openedAt,
+
+        /** Compte multidevise (opérations réglées dans leur devise) ; null = non. Exige le suivi des liquidités. */
+        Boolean multiCurrencyCash
 ) {
     /** Sans date d'ouverture. */
     public PortfolioCreateRequest(String name, String description, PortfolioType type, Boolean cashTracking,
             BigDecimal annualInterestRate) {
-        this(name, description, type, cashTracking, annualInterestRate, null);
+        this(name, description, type, cashTracking, annualInterestRate, null, null);
+    }
+
+    /** Compte en euros. */
+    public PortfolioCreateRequest(String name, String description, PortfolioType type, Boolean cashTracking,
+            BigDecimal annualInterestRate, java.time.LocalDate openedAt) {
+        this(name, description, type, cashTracking, annualInterestRate, openedAt, null);
     }
 }

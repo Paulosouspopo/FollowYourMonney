@@ -33,6 +33,7 @@ public class UserMapper {
                 user.getUsername(),
                 user.getPreferredCurrency(),
                 user.getRole(),
+                user.isDemo(),
                 user.getCreatedAt(),
                 user.getUpdatedAt()
         );

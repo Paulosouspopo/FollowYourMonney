@@ -57,6 +57,32 @@ public class User {
     private Role role = Role.USER;
 
     /** Connexion refusée tant que l'adresse n'est pas confirmée. */
+    /** Tranche marginale d'imposition (%) : avantage fiscal estimé des versements PER. */
+    @Column(name = "marginal_tax_rate", nullable = false)
+    @Builder.Default
+    private int marginalTaxRate = 30;
+
+    /** Secret TOTP chiffré (double authentification active). */
+    @Column(name = "totp_secret")
+    private String totpSecret;
+
+    /** Secret TOTP chiffré en attente de confirmation par un premier code. */
+    @Column(name = "totp_pending_secret")
+    private String totpPendingSecret;
+
+    @Column(name = "totp_enabled", nullable = false)
+    @Builder.Default
+    private boolean totpEnabled = false;
+
+    /** Dernier pas de temps TOTP accepté : un même code ne sert jamais deux fois. */
+    @Column(name = "totp_last_step")
+    private Long totpLastStep;
+
+    /** Compte invité du mode démo : données fictives, supprimé 24 h après sa création. */
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean demo = false;
+
     @Column(name = "email_verified", nullable = false)
     @Builder.Default
     private boolean emailVerified = false;

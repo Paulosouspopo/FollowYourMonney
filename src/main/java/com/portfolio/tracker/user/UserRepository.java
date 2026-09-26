@@ -8,6 +8,11 @@ import java.util.UUID;
 
 @Repository
 public interface UserRepository extends JpaRepository<User, UUID> {
+
+    /** Comptes invités du mode démo créés avant cette date (à supprimer). */
+    java.util.List<User> findByDemoTrueAndCreatedAtBefore(java.time.LocalDateTime before);
+
+    long countByDemoTrue();
     Optional<User> findByEmail(String email);
     Optional<User> findByUsername(String username);
     Boolean existsByEmail(String email);
