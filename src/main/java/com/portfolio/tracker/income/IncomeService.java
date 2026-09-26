@@ -104,7 +104,8 @@ public class IncomeService {
                         || pos.getAssetType() == AssetType.CRYPTO) {
                     continue;
                 }
-                List<DividendEvent> lastYear = DividendProjection.lastYear(dividends(pos.getSymbol(), today), today);
+                List<DividendEvent> history = dividends(pos.getSymbol(), today);
+                List<DividendEvent> lastYear = DividendProjection.lastCycle(history, today);
                 if (lastYear.isEmpty()) {
                     continue; // ne verse pas (ou capitalisant)
                 }
@@ -115,7 +116,7 @@ public class IncomeService {
                 payingCost = payingCost.add(nz(pos.getInvestedEur()));
                 positions.add(new PositionIncome(p.getPortfolioId(), p.getName(), pos.getSymbol(), pos.getName(),
                         pos.getQuantity(), perShare, currency, money(annual), pct(annual, pos.getInvestedEur()),
-                        pct(annual, pos.getCurrentValueEur()), lastYear.size(),
+                        pct(annual, pos.getCurrentValueEur()), DividendProjection.paymentsPerYear(history, today),
                         lastYear.get(lastYear.size() - 1).exDate(), "DIVIDEND"));
                 for (DividendEvent next : DividendProjection.nextYear(lastYear, today)) {
                     upcoming.add(new UpcomingPayment(next.exDate(), pos.getSymbol(), pos.getName(),

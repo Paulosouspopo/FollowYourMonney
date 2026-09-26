@@ -39,8 +39,6 @@ import java.util.stream.Stream;
 @Transactional(readOnly = true)
 public class TaxService {
 
-    static final BigDecimal FLAT_TAX = new BigDecimal("0.30");
-    static final BigDecimal SOCIAL_CHARGES = new BigDecimal("0.172");
     static final BigDecimal CRYPTO_THRESHOLD = new BigDecimal("305");
     static final BigDecimal PEA_CEILING = new BigDecimal("150000");
     static final java.util.Set<Integer> TAX_BRACKETS = java.util.Set.of(0, 11, 30, 41, 45);
@@ -84,7 +82,9 @@ public class TaxService {
         return new TaxReport(year, new ArrayList<>(years).reversed(), securities(securities, year),
                 crypto(crypto, year), peas(portfolios, movements, valuations, all), bracket,
                 retirementSavings(movements, year, bracket), lifeInsurances(portfolios, movements, valuations, all, year),
-                employeeSavings(portfolios, valuations), reminders());
+                employeeSavings(portfolios, valuations), reminders(year),
+                new TaxReport.Rates(pct(TaxRates.flatTax(year)), pct(TaxRates.socialCharges(year)),
+                        pct(TaxRates.socialCharges(currentYear)), pct(TaxRates.LIFE_INSURANCE_SOCIAL_CHARGES)));
     }
 
     /** Tranche marginale d'imposition de l'utilisateur (0, 11, 30, 41 ou 45 %). */
@@ -124,7 +124,8 @@ public class TaxService {
             LocalDate eight = opened != null ? opened.plusYears(8) : null;
             PortfolioValuation v = valuations.get(p.getId());
             BigDecimal value = v != null ? v.getCurrentValueEur() : BigDecimal.ZERO;
-            BigDecimal deposits = v != null ? v.getNetDepositsEur() : BigDecimal.ZERO;
+            // Apports nets, versements non saisis (découvert) compris
+            BigDecimal deposits = v != null ? v.getInvestedEur() : BigDecimal.ZERO;
             BigDecimal gain = value.subtract(deposits);
             BigDecimal withdrawals = sum(own.stream()
                     .filter(m -> m.getType() == CashMovementType.WITHDRAWAL && m.getMovementDate().getYear() == year)
@@ -145,11 +146,12 @@ public class TaxService {
         for (Portfolio p : portfolios.stream().filter(p -> p.getType() == PortfolioType.EPARGNE_SALARIALE).toList()) {
             PortfolioValuation v = valuations.get(p.getId());
             BigDecimal value = v != null ? v.getCurrentValueEur() : BigDecimal.ZERO;
-            BigDecimal deposits = v != null ? v.getNetDepositsEur() : BigDecimal.ZERO;
+            // Apports nets, versements non saisis (découvert) compris
+            BigDecimal deposits = v != null ? v.getInvestedEur() : BigDecimal.ZERO;
             BigDecimal gain = value.subtract(deposits);
             out.add(new TaxReport.EmployeeSavingsStatus(p.getId(), p.getName(), money(deposits),
                     money(v != null ? v.getEmployerContributionsEur() : BigDecimal.ZERO), money(value), money(gain),
-                    money(gain.max(BigDecimal.ZERO).multiply(SOCIAL_CHARGES))));
+                    money(gain.max(BigDecimal.ZERO).multiply(TaxRates.socialCharges(LocalDate.now().getYear())))));
         }
         return out;
     }
@@ -180,7 +182,7 @@ public class TaxService {
         BigDecimal dividends = sum(yearDividends.stream().map(t -> TaxEngine.nz(t.getTotalAmountEur())));
         BigDecimal credit = foreignTaxCredit(yearDividends);
         BigDecimal taxable = carry[1];
-        BigDecimal tax = taxable.add(dividends).multiply(FLAT_TAX).subtract(credit).max(BigDecimal.ZERO);
+        BigDecimal tax = taxable.add(dividends).multiply(TaxRates.flatTax(year)).subtract(credit).max(BigDecimal.ZERO);
 
         List<TaxReport.Box> boxes = new ArrayList<>();
         if (net.signum() > 0) {
@@ -233,7 +235,7 @@ public class TaxService {
         BigDecimal proceeds = sum(sales.stream().map(TaxEngine.CryptoSale::proceedsEur));
         BigDecimal net = sum(sales.stream().map(TaxEngine.CryptoSale::gainEur));
         boolean exempt = proceeds.compareTo(CRYPTO_THRESHOLD) <= 0;
-        BigDecimal tax = exempt || net.signum() <= 0 ? BigDecimal.ZERO : net.multiply(FLAT_TAX);
+        BigDecimal tax = exempt || net.signum() <= 0 ? BigDecimal.ZERO : net.multiply(TaxRates.flatTax(year));
 
         List<TaxReport.Box> boxes = new ArrayList<>();
         if (!sales.isEmpty() && !exempt) {
@@ -298,9 +300,10 @@ public class TaxService {
 
             BigDecimal deposits;
             boolean estimated = !p.isCashTracking();
+            PortfolioValuation valuation = valuations.get(p.getId());
             if (!estimated) {
-                deposits = sum(own.stream().filter(m -> m.getType() == CashMovementType.DEPOSIT).map(CashMovement::getAmount))
-                        .subtract(sum(own.stream().filter(m -> m.getType() == CashMovementType.WITHDRAWAL).map(CashMovement::getAmount)));
+                // Versements - retraits, versements non saisis (découvert) compris
+                deposits = valuation != null ? valuation.getInvestedEur() : BigDecimal.ZERO;
             } else {
                 // Sans suivi des liquidités : argent mis en jeu = achats (frais compris) - ventes nettes
                 deposits = sum(txs.stream().map(t -> switch (t.getType()) {
@@ -309,22 +312,27 @@ public class TaxService {
                     case DIVIDEND -> BigDecimal.ZERO;
                 })).max(BigDecimal.ZERO);
             }
-            PortfolioValuation valuation = valuations.get(p.getId());
             BigDecimal value = valuation != null ? valuation.getCurrentValueEur() : BigDecimal.ZERO;
             BigDecimal gain = value.subtract(deposits).max(BigDecimal.ZERO);
             out.add(new TaxReport.PeaStatus(p.getId(), p.getName(), opened, p.getOpenedAt() == null, five,
                     five != null && !five.isAfter(today), money(deposits), estimated, PEA_CEILING, money(value),
-                    money(gain.multiply(SOCIAL_CHARGES))));
+                    money(gain.multiply(TaxRates.socialCharges(LocalDate.now().getYear())))));
         }
         return out;
     }
 
     // ------------------------------------------------------------ utils
 
-    private static List<String> reminders() {
+    /** 0.186 → 18.6 */
+    private static BigDecimal pct(BigDecimal rate) {
+        return rate.movePointRight(2).stripTrailingZeros();
+    }
+
+    private static List<String> reminders(int year) {
         return List.of(
                 "Estimation établie d'après tes opérations saisies ou importées : vérifie-la avec l'IFU de chaque courtier (formulaire 2561), qui fait foi.",
-                "Flat tax par défaut (12,8 % d'impôt + 17,2 % de prélèvements sociaux). L'option pour le barème progressif (case 2OP) peut être plus avantageuse selon ta tranche.",
+                "Flat tax par défaut (12,8 % d'impôt + " + com.portfolio.tracker.notification.Formats.percent(pct(TaxRates.socialCharges(year)))
+                        + " de prélèvements sociaux). L'option pour le barème progressif (case 2OP) peut être plus avantageuse selon ta tranche.",
                 "Comptes ouverts à l'étranger (Binance, Coinbase, Revolut, certains néo-courtiers…) : à déclarer chaque année (formulaire 3916 / 3916-bis), même inactifs.",
                 "Dividendes étrangers : crédit d'impôt (case 2AB) estimé au taux de la convention fiscale, dans la limite de 12,8 % ; l'IFU de ton courtier fait foi.");
     }

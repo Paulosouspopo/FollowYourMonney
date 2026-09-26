@@ -232,8 +232,12 @@ public class PortfolioHistoryService {
 
         // État de départ : événements antérieurs à la plage recalculée (leurs
         // flux sont déjà dans les snapshots conservés)
+        // Compte sans suivi : apports nets = somme des flux des opérations
+        BigDecimal traded = BigDecimal.ZERO;
         while (next < txs.size() && day(txs.get(next)).isBefore(start)) {
-            replay(txs.get(next++), states, symbols, cash, trackCash);
+            Transaction tx = txs.get(next++);
+            replay(tx, states, symbols, cash, trackCash);
+            traded = traded.add(PerformanceFlows.tradeFlow(tx));
         }
         while (nextMovement < movements.size() && movements.get(nextMovement).getMovementDate().isBefore(start)) {
             cash.apply(movements.get(nextMovement++));
@@ -256,15 +260,18 @@ public class PortfolioHistoryService {
             LocalDate current = day;
             BigDecimal cashEur = cash.valueEur(c -> market.rateToEur(c, current, today));
             BigDecimal flow = tradeFlow;
+            traded = traded.add(tradeFlow);
+            BigDecimal contributed = traded;
             if (trackCash) {
-                BigDecimal contributed = PerformanceFlows.contributed(cash, cashEur);
+                contributed = PerformanceFlows.contributed(cash, cashEur);
                 flow = contributed.subtract(contributedBefore);
                 contributedBefore = contributed;
             }
-            PortfolioSnapshot snapshot = snapshotOf(portfolio, day, states, symbols, cashEur, market, today);
+            PortfolioSnapshot snapshot = snapshotOf(portfolio, day, states, symbols, cashEur, contributed,
+                    trackCash, market, today);
             snapshot.setNetFlow(flow.setScale(MoneyConstants.MONEY_SCALE, MoneyConstants.ROUNDING));
-            snapshot.setPerformanceValue(snapshot.getTotalValue().add(PerformanceFlows.deficit(cashEur))
-                    .setScale(MoneyConstants.MONEY_SCALE, MoneyConstants.ROUNDING));
+            // Valeur sans le découvert : déjà la valeur du snapshot (même règle que le dashboard)
+            snapshot.setPerformanceValue(snapshot.getTotalValue());
             snapshots.add(snapshot);
         }
 
@@ -275,14 +282,12 @@ public class PortfolioHistoryService {
 
     private PortfolioSnapshot snapshotOf(Portfolio portfolio, LocalDate day,
             Map<UUID, PositionState> states, Map<UUID, String> symbols,
-            BigDecimal cashEur, MarketData market, LocalDate today) {
+            BigDecimal cashEur, BigDecimal contributed, boolean trackCash, MarketData market, LocalDate today) {
 
         BigDecimal value = BigDecimal.ZERO;
-        BigDecimal invested = BigDecimal.ZERO;
 
         for (Map.Entry<UUID, PositionState> entry : states.entrySet()) {
             PositionState state = entry.getValue();
-            invested = invested.add(state.getCostBasisEur());
             if (!state.isOpen()) {
                 continue;
             }
@@ -302,11 +307,13 @@ public class PortfolioHistoryService {
                     .setScale(MoneyConstants.MONEY_SCALE, MoneyConstants.ROUNDING));
         }
 
-        // Même règle que PortfolioValuationService : les liquidités s'ajoutent à la
-        // valeur et à l'investi ; le % latent reste sur le prix de revient des positions.
-        BigDecimal positionsCost = invested.setScale(MoneyConstants.MONEY_SCALE, MoneyConstants.ROUNDING);
-        value = value.setScale(MoneyConstants.MONEY_SCALE, MoneyConstants.ROUNDING).add(cashEur);
-        invested = positionsCost.add(cashEur);
+        // Mêmes règles que PortfolioValuationService : investi = apports nets,
+        // valeur = positions + solde positif ; gain = gain total.
+        value = value.setScale(MoneyConstants.MONEY_SCALE, MoneyConstants.ROUNDING);
+        if (trackCash) {
+            value = PerformanceFlows.trackedValue(value, cashEur);
+        }
+        BigDecimal invested = contributed.setScale(MoneyConstants.MONEY_SCALE, MoneyConstants.ROUNDING);
         BigDecimal gain = value.subtract(invested);
 
         return PortfolioSnapshot.builder()
@@ -315,10 +322,10 @@ public class PortfolioHistoryService {
                 .totalValue(value)
                 .totalInvested(invested)
                 .gainLoss(gain)
-                .gainLossPercentage(positionsCost.signum() == 0
+                .gainLossPercentage(invested.signum() <= 0
                         ? BigDecimal.ZERO
                         : gain.multiply(BigDecimal.valueOf(100))
-                                .divide(positionsCost, MoneyConstants.PERCENT_SCALE, MoneyConstants.ROUNDING))
+                                .divide(invested, MoneyConstants.PERCENT_SCALE, MoneyConstants.ROUNDING))
                 .baseCurrency(MoneyConstants.BASE_CURRENCY)
                 .build();
     }

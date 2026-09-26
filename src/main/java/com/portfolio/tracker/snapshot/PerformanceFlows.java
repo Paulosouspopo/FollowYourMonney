@@ -48,6 +48,15 @@ public final class PerformanceFlows {
         return cash.getNetDepositsEur().add(deficit(cashValueEur));
     }
 
+    /**
+     * Valeur d'un compte suivi : positions + solde positif. Un découvert
+     * correspond à des versements non saisis (déjà comptés dans
+     * {@link #contributed}) : il ne diminue pas la valeur.
+     */
+    public static BigDecimal trackedValue(BigDecimal positionsValueEur, BigDecimal cashValueEur) {
+        return positionsValueEur.add(cashValueEur.max(BigDecimal.ZERO));
+    }
+
     private static BigDecimal nz(BigDecimal v) {
         return v != null ? v : BigDecimal.ZERO;
     }

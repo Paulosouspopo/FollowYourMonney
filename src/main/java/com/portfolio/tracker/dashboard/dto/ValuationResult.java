@@ -59,13 +59,14 @@ public class ValuationResult {
         BigDecimal invested = sum(portfolios, PortfolioValuation::getInvestedEur);
         BigDecimal unrealized = sum(portfolios, PortfolioValuation::getUnrealizedGainEur);
         BigDecimal cash = sum(portfolios, PortfolioValuation::getCashEur);
+        BigDecimal positionsCost = sum(portfolios, PortfolioValuation::getPositionsCostEur);
 
         return ValuationResult.builder()
                 .totalValueEur(value)
                 .totalInvestedEur(invested)
                 .totalUnrealizedGainEur(unrealized)
                 // % latent sur le prix de revient des positions : les liquidités ne le diluent pas
-                .totalUnrealizedGainPercentage(percentage(unrealized, invested.subtract(cash)))
+                .totalUnrealizedGainPercentage(percentage(unrealized, positionsCost))
                 .totalRealizedGainEur(sum(portfolios, PortfolioValuation::getRealizedGainEur))
                 .totalDividendsEur(sum(portfolios, PortfolioValuation::getDividendsEur))
                 .totalFeesEur(sum(portfolios, PortfolioValuation::getTotalFeesEur))

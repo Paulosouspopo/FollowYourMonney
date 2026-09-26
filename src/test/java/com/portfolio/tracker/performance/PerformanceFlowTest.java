@@ -140,7 +140,9 @@ class PerformanceFlowTest extends AbstractIntegrationTest {
         buy(pf, 10, 5);
 
         PortfolioSnapshot buyDay = snapshot(pf, today.minusDays(5));
-        assertThat(buyDay.getTotalValue()).isEqualByComparingTo("0"); // 1000 € de titres, -1000 € de liquidités
+        // 1000 € de titres, -1000 € de liquidités : le découvert (versement non saisi) ne compte pas dans la valeur
+        assertThat(buyDay.getTotalValue()).isEqualByComparingTo("1000");
+        assertThat(buyDay.getTotalInvested()).isEqualByComparingTo("1000");
         assertThat(buyDay.getPerformanceValue()).isEqualByComparingTo("1000");
         assertThat(buyDay.getNetFlow()).isEqualByComparingTo("1000");
         assertThat(performanceService.performance(user.getId(), pf, "all", null).twrPct()).isEqualByComparingTo("10");

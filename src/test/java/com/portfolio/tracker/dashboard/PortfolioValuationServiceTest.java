@@ -519,7 +519,8 @@ class PortfolioValuationServiceTest {
 
             assertThat(p.getCurrentValueEur()).isEqualByComparingTo("820.00");
             assertThat(p.getCashEur()).isEqualByComparingTo("820.00");
-            assertThat(p.getInvestedEur()).isEqualByComparingTo("820.00");
+            // Investi = apports nets : les intérêts sont un gain
+            assertThat(p.getInvestedEur()).isEqualByComparingTo("800.00");
             assertThat(p.getUnrealizedGainEur()).isEqualByComparingTo("0.00");
             assertThat(p.getInterestEur()).isEqualByComparingTo("20.00");
             assertThat(p.getNetDepositsEur()).isEqualByComparingTo("800.00");
@@ -539,7 +540,8 @@ class PortfolioValuationServiceTest {
             // 5000 - (1000 + 5 de frais) - 3 de droits de garde
             assertThat(p.getCashEur()).isEqualByComparingTo("3992.00");
             assertThat(p.getCurrentValueEur()).isEqualByComparingTo("5192.00");
-            assertThat(p.getInvestedEur()).isEqualByComparingTo("4997.00");
+            // Investi = versements ; gain = 195 de latent - 3 de droits de garde
+            assertThat(p.getInvestedEur()).isEqualByComparingTo("5000.00");
             assertThat(p.getUnrealizedGainEur()).isEqualByComparingTo("195.00");
             assertThat(p.getUnrealizedGainPercentage()).isEqualByComparingTo("19.40");
             assertThat(p.getTotalFeesEur()).isEqualByComparingTo("8.00");
@@ -575,6 +577,70 @@ class PortfolioValuationServiceTest {
             // 1000 - 1000 + (600 - 2) + 30
             assertThat(p.getCashEur()).isEqualByComparingTo("628.00");
             assertThat(p.getCurrentValueEur()).isEqualByComparingTo("1528.00");
+        }
+
+        @Test
+        @DisplayName("Vente et dividende sur un compte suivi : l'investi reste le versement, le gain inclut réalisé et dividende")
+        void investiApresVenteEtDividende() {
+            portfolio.setCashTracking(true);
+            givenTransactions(
+                    tx(TransactionType.BUY, "2", "200", "0", 20),
+                    tx(TransactionType.BUY, "3", "250", "0", 15),
+                    tx(TransactionType.SELL, "2", "300", "0", 10),
+                    tx(TransactionType.DIVIDEND, "1", "6", "0", 5));
+            givenMovements(movement(CashMovementType.DEPOSIT, "2000", 30));
+            givenPrice("BTC-USD", "250");
+
+            ValuationResult result = valuationService.valuate(userId, null, null);
+            PortfolioValuation p = result.getPortfolios().get(0);
+
+            // 2000 - 400 - 750 + 600 + 6
+            assertThat(p.getCashEur()).isEqualByComparingTo("1456.00");
+            assertThat(p.getCurrentValueEur()).isEqualByComparingTo("2206.00");
+            assertThat(p.getInvestedEur()).isEqualByComparingTo("2000.00");
+            // 206 = latent (750 - 690) + réalisé (600 - 460) + dividende 6
+            assertThat(p.getCurrentValueEur().subtract(p.getInvestedEur())).isEqualByComparingTo("206.00");
+            assertThat(p.getUnrealizedGainEur()).isEqualByComparingTo("60.00");
+            assertThat(p.getRealizedGainEur()).isEqualByComparingTo("140.00");
+            assertThat(p.getPositionsCostEur()).isEqualByComparingTo("690.00");
+            // % latent sur le prix de revient des positions, pas sur l'investi
+            assertThat(result.getTotalUnrealizedGainPercentage()).isEqualByComparingTo("8.70");
+        }
+
+        @Test
+        @DisplayName("Achat sans versement : le découvert ne diminue pas la valeur et compte comme un apport")
+        void decouvert() {
+            portfolio.setCashTracking(true);
+            givenTransactions(tx(TransactionType.BUY, "10", "100", "0", 10));
+            givenMovements();
+            givenPrice("BTC-USD", "105");
+
+            ValuationResult result = valuationService.valuate(userId, null, null);
+            PortfolioValuation p = result.getPortfolios().get(0);
+
+            assertThat(p.getCashEur()).isEqualByComparingTo("-1000.00");
+            assertThat(p.getCurrentValueEur()).isEqualByComparingTo("1050.00");
+            assertThat(p.getInvestedEur()).isEqualByComparingTo("1000.00");
+            assertThat(result.getTotalValueEur()).isEqualByComparingTo("1050.00");
+        }
+
+        @Test
+        @DisplayName("Sans suivi : investi = achats - ventes - dividendes, le gain inclut réalisé et dividende")
+        void sansSuiviApportsNets() {
+            givenTransactions(
+                    tx(TransactionType.BUY, "10", "100", "0", 20),
+                    tx(TransactionType.SELL, "4", "150", "2", 10),
+                    tx(TransactionType.DIVIDEND, "1", "30", "0", 5));
+            givenPrice("BTC-USD", "150");
+
+            PortfolioValuation p = valuationService.valuate(userId, null, null).getPortfolios().get(0);
+
+            assertThat(p.getCurrentValueEur()).isEqualByComparingTo("900.00");
+            // 1000 - (600 - 2) - 30
+            assertThat(p.getInvestedEur()).isEqualByComparingTo("372.00");
+            // 528 = latent 300 + réalisé 198 + dividende 30
+            assertThat(p.getCurrentValueEur().subtract(p.getInvestedEur())).isEqualByComparingTo("528.00");
+            assertThat(p.getUnrealizedGainPercentage()).isEqualByComparingTo("50.00");
         }
     }
 

@@ -11,6 +11,7 @@ import com.portfolio.tracker.portfolio.PortfolioRepository;
 import com.portfolio.tracker.shared.CurrencyConverter;
 import com.portfolio.tracker.shared.MoneyConstants;
 import com.portfolio.tracker.shared.exception.ResourceNotFoundException;
+import com.portfolio.tracker.snapshot.PerformanceFlows;
 import com.portfolio.tracker.transaction.Transaction;
 import com.portfolio.tracker.transaction.TransactionRepository;
 import lombok.RequiredArgsConstructor;
@@ -36,8 +37,12 @@ import java.util.stream.Collectors;
  * (figé sur la transaction). La valeur courante (currentValueEur) utilise
  * le taux du jour. C'est volontaire : le montant que j'ai sorti de ma poche
  * ne bouge pas rétroactivement parce que l'euro a fluctué depuis.
- * 4. Liquidités (portefeuilles avec suivi, livrets) : le solde s'ajoute à la
- * valeur et à l'investi ; le % de plus-value latente reste calculé sur le seul
+ * 4. Investi = apports nets, l'argent réellement sorti de la poche
+ * ({@link PerformanceFlows}) : versements - retraits (+ découvert) pour un
+ * compte suivi, achats - ventes - dividendes pour un compte sans suivi. Le gain
+ * (valeur - investi) inclut donc latent, réalisé, dividendes et intérêts. La
+ * valeur d'un compte suivi = positions + solde positif (un découvert = des
+ * versements non saisis). Le % de plus-value latente reste calculé sur le seul
  * prix de revient des positions.
  * 5. Aucun cours de marché : la position est valorisée au prix de sa
  * dernière transaction (même règle que la courbe historique, jamais 0) et
@@ -136,6 +141,12 @@ public class PortfolioValuationService {
         }
         // Soldes en devises : taux du jour (comme les positions)
         BigDecimal cashEur = scale(cash.valueEur(c -> fxSession.rate(c, MoneyConstants.BASE_CURRENCY)));
+        BigDecimal value = portfolio.isCashTracking()
+                ? PerformanceFlows.trackedValue(positionsValue, cashEur)
+                : positionsValue;
+        BigDecimal invested = portfolio.isCashTracking()
+                ? PerformanceFlows.contributed(cash, cashEur)
+                : portfolioTxs.stream().map(PerformanceFlows::tradeFlow).reduce(BigDecimal.ZERO, BigDecimal::add);
 
         long openCount = positions.stream().filter(p -> p.getQuantity().signum() > 0).count();
 
@@ -143,8 +154,9 @@ public class PortfolioValuationService {
                 .portfolioId(portfolio.getId())
                 .name(portfolio.getName())
                 .type(portfolio.getType())
-                .currentValueEur(positionsValue.add(cashEur))
-                .investedEur(positionsCost.add(cashEur))
+                .currentValueEur(scale(value))
+                .investedEur(scale(invested))
+                .positionsCostEur(positionsCost)
                 .unrealizedGainEur(unrealized)
                 .unrealizedGainPercentage(percentage(unrealized, positionsCost))
                 .realizedGainEur(sum(positions, PositionValuation::getRealizedGainEur))

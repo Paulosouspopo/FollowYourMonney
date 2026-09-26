@@ -14,7 +14,16 @@ import java.util.UUID;
  */
 public record TaxReport(int year, List<Integer> years, Securities securities, Crypto crypto, List<PeaStatus> peas,
                         int marginalTaxRate, RetirementSavings retirementSavings, List<LifeInsuranceStatus> lifeInsurances,
-                        List<EmployeeSavingsStatus> employeeSavings, List<String> reminders) {
+                        List<EmployeeSavingsStatus> employeeSavings, List<String> reminders, Rates rates) {
+
+    /**
+     * Taux appliqués, en % (ex. 31.4) : flat tax et prélèvements sociaux de
+     * l'année affichée, prélèvements sociaux d'un retrait aujourd'hui (PEA,
+     * épargne salariale), prélèvements sociaux de l'assurance-vie.
+     */
+    public record Rates(BigDecimal flatTaxPct, BigDecimal socialChargesPct, BigDecimal currentSocialChargesPct,
+                        BigDecimal lifeInsuranceSocialChargesPct) {
+    }
 
     /**
      * Versements de l'année sur les PER (déductibles du revenu imposable, dans
@@ -55,7 +64,7 @@ public record TaxReport(int year, List<Integer> years, Securities securities, Cr
      *
      * @param carriedLossesUsedEur moins-values des années précédentes imputées cette année
      * @param lossesCarryForwardEur moins-values encore reportables sur les années suivantes
-     * @param estimatedTaxEur       flat tax 30 % (12,8 % d'impôt + 17,2 % de prélèvements sociaux), crédit d'impôt déduit
+     * @param estimatedTaxEur       flat tax de l'année ({@link Rates}), crédit d'impôt déduit
      * @param foreignTaxCreditEur   crédit d'impôt estimé sur les dividendes d'actions étrangères (case 2AB)
      */
     public record Securities(List<Sale> sales, BigDecimal gainsEur, BigDecimal lossesEur, BigDecimal netEur,
@@ -84,7 +93,7 @@ public record TaxReport(int year, List<Integer> years, Securities securities, Cr
     /**
      * @param openedAtEstimated date d'ouverture non renseignée : première opération
      * @param depositsEstimated sans suivi des liquidités : achats - ventes
-     * @param socialChargesIfWithdrawnEur prélèvements sociaux (17,2 %) sur le gain en cas de retrait total aujourd'hui
+     * @param socialChargesIfWithdrawnEur prélèvements sociaux (taux de l'année en cours) sur le gain en cas de retrait total aujourd'hui
      */
     public record PeaStatus(UUID portfolioId, String name, LocalDate openedAt, boolean openedAtEstimated,
                             LocalDate fiveYearsDate, boolean fiveYearsReached, BigDecimal depositsEur,

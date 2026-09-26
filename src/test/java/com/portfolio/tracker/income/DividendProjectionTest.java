@@ -34,6 +34,30 @@ class DividendProjectionTest {
     }
 
     @Test
+    @DisplayName("Trimestriel au calendrier qui glisse : 3 détachements sur 365 jours restent un trimestriel")
+    void frequenceParEcart() {
+        List<DividendEvent> events = List.of(div("2024-09-25", "0.79"), div("2024-12-31", "0.79"),
+                div("2025-03-31", "0.85"), div("2025-06-30", "0.85"), div("2025-09-24", "0.85"),
+                div("2025-12-31", "0.85"), div("2026-03-31", "0.85"), div("2026-06-30", "0.85"));
+
+        assertThat(DividendProjection.lastYear(events, TODAY)).hasSize(3); // 24/09/2025 : 366 jours
+        assertThat(DividendProjection.paymentsPerYear(events, TODAY)).isEqualTo(4);
+        List<DividendEvent> cycle = DividendProjection.lastCycle(events, TODAY);
+        assertThat(cycle).hasSize(4);
+        assertThat(DividendProjection.perShare(cycle)).isEqualByComparingTo("3.40");
+    }
+
+    @Test
+    @DisplayName("Annuel et semestriel d'après l'écart entre deux détachements")
+    void annuelEtSemestriel() {
+        assertThat(DividendProjection.paymentsPerYear(List.of(div("2025-05-20", "2.00"), div("2026-05-19", "2.10")), TODAY))
+                .isEqualTo(1);
+        assertThat(DividendProjection.paymentsPerYear(List.of(div("2025-05-20", "1.00"), div("2025-11-20", "1.00"),
+                div("2026-05-19", "1.10")), TODAY)).isEqualTo(2);
+        assertThat(DividendProjection.paymentsPerYear(List.of(div("2026-05-19", "1.10")), TODAY)).isEqualTo(1);
+    }
+
+    @Test
     @DisplayName("Rien versé depuis un an (capitalisant, suspendu) : aucune projection")
     void aucun() {
         List<DividendEvent> lastYear = DividendProjection.lastYear(List.of(div("2024-05-10", "1.00")), TODAY);
