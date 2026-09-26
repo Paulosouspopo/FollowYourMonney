@@ -397,6 +397,23 @@ des vues par portefeuille/actif/transaction, et à terme des notifications
   `PUT /api/tutorials/settings {autoEnabled}`, `DELETE /api/tutorials` (tout
   revoir). Chaque appel renvoie l'état complet.
 
+## Déploiement (`deploy/`)
+- Un serveur, `deploy/compose.yaml` : `db` (PostgreSQL 16), `api` (image
+  `Dockerfile` : Maven → JRE 21, profil `prod`, TZ Europe/Paris), `web`
+  (image du dépôt front : Caddy = HTTPS Let's Encrypt + front statique +
+  proxy `/api/*` → `api:8080`). Même origine : pas de CORS, cookie
+  `SameSite=Strict` et service worker OK. Seul Caddy est exposé.
+- Les deux dépôts clonés côte à côte (`~/fym/tracker`, `~/fym/tracker-ui`) ;
+  secrets dans `deploy/.env` (modèle `.env.example`, jamais commité).
+- Profil `prod` (`application-prod.properties`) : cookie `Secure`,
+  `server.forward-headers-strategy=native` (IP réelle du client pour les
+  limites de connexion, sinon tout le monde partage l'IP du proxy), SMTP
+  STARTTLS. `app.cors.allowed-origins` configurable (`CORS_ALLOWED_ORIGINS`).
+- Cible actuelle : Oracle Cloud Always Free (ARM), guide pas à pas dans
+  `deploy/README.md`. Sauvegardes : `deploy/backup.sh` (pg_dump, 14 jours).
+- CI : job `docker` (compose valide + build de l'image) ; côté front, build
+  de l'image + `caddy validate`.
+
 ## Dev local : antivirus Avast
 - Avast (« Web/Mail Shield », analyse HTTPS) re-signe tout le trafic HTTPS :
   Java refuse alors Yahoo (`PKIX path building failed`), git et Docker aussi.

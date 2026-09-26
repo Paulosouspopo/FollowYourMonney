@@ -1,0 +1,7 @@
+target
+.idea
+.git
+examples-imports
+deploy
+src/main/resources/application-local.properties
+*.iml

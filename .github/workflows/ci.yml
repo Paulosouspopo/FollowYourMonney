@@ -35,3 +35,15 @@ jobs:
         with:
           name: surefire-reports
           path: target/surefire-reports/
+
+  docker:
+    name: Image Docker de production
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fichier compose de production valide
+        working-directory: deploy
+        run: DOMAIN=example.com DB_PASSWORD=x JWT_SECRET=y docker compose config -q
+      - name: Build de l'image
+        run: docker build -t fym-api .
